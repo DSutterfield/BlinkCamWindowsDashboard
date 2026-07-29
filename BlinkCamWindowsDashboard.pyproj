@@ -1,0 +1,67 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{3c758e0d-4647-4947-a642-05763c672df7}</ProjectGuid>
+    <ProjectHome />
+    <StartupFile>blink_dvr.py</StartupFile>
+    <SearchPath />
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <ProjectTypeGuids>{888888a0-9f3d-457c-b088-3a5042f75d52}</ProjectTypeGuids>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <InterpreterId>MSBuild|.venv|$(MSBuildProjectFullPath)</InterpreterId>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" />
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" />
+  <PropertyGroup>
+    <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="config\settings.ini" />
+    <Content Include="img\img.jpg" />
+    <Content Include="requirements.txt" />
+    <Content Include="static\thumbs\Mini___black.jpg" />
+    <Content Include="static\thumbs\Mini___white.jpg" />
+    <Content Include="static\thumbs\Outdoor_4___back_door.jpg" />
+    <Content Include="static\thumbs\Outdoor_4___car.jpg" />
+    <Content Include="static\thumbs\Outdoor_4___front.jpg" />
+    <Content Include="templates\index.html" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="arm_control.py" />
+    <Compile Include="backfill_metadata.py" />
+    <Compile Include="BlinkCamWindowsDashboard\BlinkCamWindowsDashboard.py" />
+    <Compile Include="blink_dvr.py" />
+    <Compile Include="capability_matrix.py" />
+    <Compile Include="capability_probe.py" />
+    <Compile Include="first_login.py" />
+    <Compile Include="liveview_raw.py" />
+    <Compile Include="metadata_helper.py" />
+    <Compile Include="mini_check.py" />
+    <Compile Include="motion_tracker.py" />
+    <Compile Include="smart_detect_check.py" />
+    <Compile Include="web_app.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="BlinkCamWindowsDashboard" />
+    <Folder Include="config" />
+    <Folder Include="img" />
+    <Folder Include="static\" />
+    <Folder Include="static\thumbs" />
+    <Folder Include="templates" />
+  </ItemGroup>
+  <ItemGroup>
+    <Interpreter Include=".venv\">
+      <Id>.venv</Id>
+      <Description>.venv (Python 3.13 (64-bit))</Description>
+      <InterpreterPath>Scripts\python.exe</InterpreterPath>
+      <WindowsInterpreterPath>Scripts\pythonw.exe</WindowsInterpreterPath>
+      <Version>3.13</Version>
+      <Architecture>X64</Architecture>
+      <PathEnvironmentVariable>PYTHONPATH</PathEnvironmentVariable>
+    </Interpreter>
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
+</Project>
