@@ -1,0 +1,13 @@
+﻿# Python virtual environments and cache files
+.venv/
+.venv_python39_backup_*/
+__pycache__/
+*.py[cod]
+
+# Visual Studio local files
+.vs/
+*.pyproj.user
+
+# Private credentials and generated reports
+config/credentials*.json
+reports/
