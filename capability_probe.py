@@ -170,7 +170,14 @@ def camera_capabilities(camera: object) -> dict[str, Any]:
         "night_vision_write_member_exposed": has_method(
             camera, "async_set_night_vision"
         ),
-        "night_vision_product_type_known": product_type in {"owl", "catalina"},
+        "night_vision_product_type_known": product_type
+        in {
+            "catalina",
+            "hawk",
+            "owl",
+            "sedona",
+            "tulip",
+        },
         "temperature_value_present": getattr(camera, "temperature", None) is not None,
         "battery_value_present": any(
             value is not None

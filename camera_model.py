@@ -36,7 +36,14 @@ CAPABILITY_KNOWN_NOT_EXPOSED = "known_not_exposed"
 CAPABILITY_UNKNOWN = "unknown"
 
 # This reproduces the product-type recognition used by capability_probe.py.
-KNOWN_NIGHT_VISION_PRODUCT_TYPES = {"owl", "catalina"}
+KNOWN_NIGHT_VISION_PRODUCT_TYPES = {
+    "catalina",
+    "hawk",
+    "owl",
+    "sedona",
+    "tulip",
+    "catalina"
+}
 
 
 def safe_getattr(obj: object, name: str, default: Any = None) -> Any:
