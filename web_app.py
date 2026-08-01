@@ -4,10 +4,12 @@ Run: python web_app.py
 Access: http://localhost:5000 (or http://<your-pc-ip>:5000 on LAN)
 """
 import asyncio
+from camera_model import build_camera_records
 import configparser
 import json
 import logging
 import motion_tracker
+
 
 from datetime import datetime
 from pathlib import Path
@@ -69,15 +71,24 @@ def api_cameras():
     async def fetch(blink):
         sync_modules = getattr(blink, "sync", {}) or {}
         system_armed = any(sm.arm for sm in sync_modules.values())
-        cams = []
-        for name, cam in blink.cameras.items():
-            cams.append({
-                "name": name,
-                "type": type(cam).__name__,
-                "motion_enabled": cam.motion_enabled,
-                "thumbnail_url": f"/static/thumbs/{thumb_filename(name)}",
-            })
-        return {"system_armed": system_armed, "cameras": cams}
+
+        cameras = build_camera_records(blink)
+
+        # Compatibility fields used by the existing index.html.
+        # These can be removed after the Dashboard is updated to use
+        # the normalized status and capability sections directly.
+        for camera in cameras:
+            camera["thumbnail_url"] = (
+                f"/static/thumbs/{thumb_filename(camera['raw_name'])}"
+            )
+            camera["motion_enabled"] = (
+                camera["status"]["motion_enabled"]
+            )
+
+        return {
+            "system_armed": system_armed,
+            "cameras": cameras,
+        }
 
     with blink_lock:
         return jsonify(run_async(with_blink(fetch)))
