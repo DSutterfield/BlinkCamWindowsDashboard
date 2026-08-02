@@ -11,7 +11,7 @@ import logging
 import motion_tracker
 
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
@@ -173,28 +173,107 @@ def api_camera_motion():
 
 @app.route("/api/clips")
 def api_clips():
-    """List downloaded MP4s with metadata, newest first."""
-    from metadata_helper import read_sidecar
+    """List every downloaded MP4 with its actual recording time.
+
+    Developer note — 2026-08-02, Dan and Sage:
+    The original viewer sorted clips by the MP4 file's modified time.
+    That value normally represents when the file was downloaded, not when
+    the camera recorded it.
+
+    Recording time is now obtained in this order:
+        1. Blink sidecar metadata created_at
+        2. Timestamp encoded in the BlinkPy filename
+        3. File modified time as a last-resort fallback
+
+    The former 200-clip limit was also removed. Pagination can be added
+    later if the collection becomes large enough to require it.
+    """
+    from metadata_helper import filename_to_timestamp, read_sidecar
 
     if not CLIPS_DIR.exists():
         return jsonify([])
+
     clips = []
+
     for mp4 in CLIPS_DIR.glob("*.mp4"):
         stat = mp4.stat()
         sidecar = read_sidecar(mp4)
+
+        recorded_dt = None
+        recorded_source = None
+
+        # Best source: the timestamp returned by Blink for the media event.
+        if sidecar:
+            created_at = sidecar.get("created_at")
+
+            if created_at:
+                try:
+                    recorded_dt = datetime.fromisoformat(
+                        created_at.replace("Z", "+00:00")
+                    )
+
+                    if recorded_dt.tzinfo is None:
+                        recorded_dt = recorded_dt.replace(
+                            tzinfo=timezone.utc
+                        )
+
+                    recorded_dt = recorded_dt.astimezone(timezone.utc)
+                    recorded_source = "metadata"
+                except (TypeError, ValueError):
+                    recorded_dt = None
+
+        # Second choice: timestamp encoded in the downloaded filename.
+        if recorded_dt is None:
+            filename_dt = filename_to_timestamp(mp4.name)
+
+            if filename_dt is not None:
+                recorded_dt = filename_dt.replace(tzinfo=timezone.utc)
+                recorded_source = "filename"
+
+        # Last resort: when the MP4 file was written to local storage.
+        if recorded_dt is None:
+            recorded_dt = datetime.fromtimestamp(
+                stat.st_mtime,
+                tz=timezone.utc,
+            )
+            recorded_source = "file_modified"
+
         clip_data = {
             "filename": mp4.name,
             "size_mb": round(stat.st_size / 1_000_000, 2),
-            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            "source": None,        # cv_motion / pir / snapshot
-            "cv_detection": [],    # ['vehicle'], ['person'], etc.
+
+            # Actual camera recording time whenever available.
+            "recorded_at": recorded_dt.isoformat(),
+            "recorded_source": recorded_source,
+
+            # Retained separately for diagnostics and file management.
+            "modified": datetime.fromtimestamp(
+                stat.st_mtime,
+                tz=timezone.utc,
+            ).isoformat(),
+
+            "source": None,
+            "cv_detection": [],
         }
+
         if sidecar:
             clip_data["source"] = sidecar.get("source")
-            clip_data["cv_detection"] = sidecar.get("cv_detection", [])
+            clip_data["cv_detection"] = sidecar.get(
+                "cv_detection",
+                [],
+            )
+
         clips.append(clip_data)
-    clips.sort(key=lambda c: c["modified"], reverse=True)
-    return jsonify(clips[:200])
+
+    # The API defaults to newest recording first. The browser will soon
+    # allow the operator to reverse this order without another API request.
+    clips.sort(
+        key=lambda clip: clip["recorded_at"],
+        reverse=True,
+    )
+
+    return jsonify(clips)
+
 
 @app.route("/clips/<path:filename>")
 def serve_clip(filename):

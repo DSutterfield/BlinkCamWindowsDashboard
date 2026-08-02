@@ -27,7 +27,7 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50%      { opacity: 0.6; transform: scale(1.15); }
   }
-  
+
   .clips-list-wrap .clip-icon {
     display: inline-block;
     margin-right: 0.4rem;
@@ -227,6 +227,22 @@
     min-height: 0.9rem;
   }
 
+        .sort-select {
+            width: 100%;
+            margin-top: 0.4rem;
+            padding: 0.45rem 0.6rem;
+            background: #1a1a1a;
+            color: #eee;
+            border: 1px solid #444;
+            border-radius: 3px;
+            font-size: 0.82rem;
+            cursor: pointer;
+        }
+
+        .sort-select:focus {
+            outline: none;
+            border-color: #678;
+        }
   .clips-list-wrap {
     flex: 1 1 auto;
     overflow-y: auto;
@@ -290,52 +306,61 @@
 
   <!-- RIGHT: Clips with search + date filter -->
   <div class="panel clips">
-    <div class="clips-header">
-      <h2>Recorded Clips</h2>
+      <div class="clips-header">
+          <h2>Recorded Clips</h2>
 
-      <div class="search-wrap">
-        <input type="text" id="search-input" class="search-input"
-               placeholder="Search clips... (Enter to apply)"
-               oninput="onSearchInput()"
-               onkeydown="onSearchKey(event)">
-        <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear search">×</button>
+          <div class="search-wrap">
+              <input type="text" id="search-input" class="search-input"
+                     placeholder="Search clips... (Enter to apply)"
+                     oninput="onSearchInput()"
+                     onkeydown="onSearchKey(event)">
+              <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear search">×</button>
+          </div>
+
+          <div class="date-filter-row" style="position:relative">
+              <button class="date-btn" id="date-btn" onclick="toggleDatePopover(event)">
+                  📅 Any date
+              </button>
+              <button class="date-btn-clear" id="date-clear" onclick="clearDateFilter()" title="Clear date filter">×</button>
+
+              <div class="date-popover" id="date-popover">
+                  <h3>Quick Presets</h3>
+                  <div class="presets">
+                      <button class="preset" onclick="applyPreset('today')">Today</button>
+                      <button class="preset" onclick="applyPreset('yesterday')">Yesterday</button>
+                      <button class="preset" onclick="applyPreset('last7')">Last 7 days</button>
+                      <button class="preset" onclick="applyPreset('last30')">Last 30 days</button>
+                  </div>
+
+                  <h3>Custom Range</h3>
+                  <div class="field">
+                      <label for="date-start">From</label>
+                      <input type="date" id="date-start">
+                  </div>
+                  <div class="field">
+                      <label for="date-end">To</label>
+                      <input type="date" id="date-end">
+                  </div>
+
+                  <div class="actions">
+                      <button class="btn-cancel" onclick="closeDatePopover()">Cancel</button>
+                      <button class="btn-apply" onclick="applyCustomRange()">Apply</button>
+                  </div>
+              </div>
+          </div>
+
+          <div class="search-status" id="search-status"></div>
+
+          <select id="clip-sort"
+                  class="sort-select"
+                  onchange="changeClipSort(this.value)"
+                  title="Choose clip display order">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+          </select>
+
+          <button class="refresh-btn" onclick="loadClips()">Refresh List</button>
       </div>
-
-      <div class="date-filter-row" style="position:relative">
-        <button class="date-btn" id="date-btn" onclick="toggleDatePopover(event)">
-          📅 Any date
-        </button>
-        <button class="date-btn-clear" id="date-clear" onclick="clearDateFilter()" title="Clear date filter">×</button>
-
-        <div class="date-popover" id="date-popover">
-          <h3>Quick Presets</h3>
-          <div class="presets">
-            <button class="preset" onclick="applyPreset('today')">Today</button>
-            <button class="preset" onclick="applyPreset('yesterday')">Yesterday</button>
-            <button class="preset" onclick="applyPreset('last7')">Last 7 days</button>
-            <button class="preset" onclick="applyPreset('last30')">Last 30 days</button>
-          </div>
-
-          <h3>Custom Range</h3>
-          <div class="field">
-            <label for="date-start">From</label>
-            <input type="date" id="date-start">
-          </div>
-          <div class="field">
-            <label for="date-end">To</label>
-            <input type="date" id="date-end">
-          </div>
-
-          <div class="actions">
-            <button class="btn-cancel" onclick="closeDatePopover()">Cancel</button>
-            <button class="btn-apply" onclick="applyCustomRange()">Apply</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="search-status" id="search-status"></div>
-      <button class="refresh-btn" onclick="loadClips()">Refresh List</button>
-    </div>
 
     <div class="clips-list-wrap">
       <ul id="clip-list"><li>Loading...</li></ul>
@@ -347,10 +372,15 @@
 <script>
   function bust(url) { return url + '?t=' + Date.now(); }
 
-  let allClips = [];
-  let activeFilter = "";
-  let dateStart = null;
-  let dateEnd = null;
+   let allClips = [];
+   let activeFilter = "";
+   let dateStart = null;
+   let dateEnd = null;
+
+    // 2026-08-02 - Dan/Sage:
+    // Preserve the operator's preferred clip order between browser sessions.
+    let clipSort = localStorage.getItem('blink_clip_sort') || 'newest';
+    document.getElementById('clip-sort').value = clipSort;
 
 // --- Close popovers on outside click -----------------------------------
   document.addEventListener('click', (e) => {
@@ -377,22 +407,22 @@
     updateDateButton();
   })();
 
- 
+
 // --- Live motion polling ----------------------------------------------
   async function pollActiveMotion() {
     try {
       const res = await fetch('/api/active_motion');
       const active = await res.json();
-      
+
       document.querySelectorAll('.camera-card').forEach(card => {
         const name = card.dataset.cameraName;
         const nameSpan = card.querySelector('.name');
         if (!nameSpan) return;
-        
+
         // Remove any existing motion indicator
         const oldBadge = nameSpan.querySelector('.motion-indicator');
         if (oldBadge) oldBadge.remove();
-        
+
         if (active[name]) {
           const cv = active[name].cv_detection || [];
           let icon = '🔴';
@@ -406,7 +436,7 @@
           } else if (active[name].source === 'pir') {
             icon = '〰️'; title = 'PIR motion';
           }
-          
+
           const badge = document.createElement('span');
           badge.className = 'motion-indicator';
           badge.textContent = icon;
@@ -617,12 +647,18 @@
     return clip.source || 'unknown';
   }
 
+  function changeClipSort(value) {
+    clipSort = value === 'oldest' ? 'oldest' : 'newest';
+    localStorage.setItem('blink_clip_sort', clipSort);
+    renderClips();
+  }
+
   function renderClips() {
     const list = document.getElementById('clip-list');
     const status = document.getElementById('search-status');
     list.innerHTML = '';
 
-    let visible = allClips;
+    let visible = [...allClips];
 
     if (activeFilter.length > 0) {
       const q = activeFilter.toLowerCase();
@@ -631,12 +667,25 @@
 
     if (dateStart || dateEnd) {
       visible = visible.filter(c => {
-        const d = new Date(c.modified);
+        const d = new Date(c.recorded_at || c.modified);
         if (dateStart && d < dateStart) return false;
         if (dateEnd && d > dateEnd) return false;
         return true;
       });
     }
+
+    // Sort by the camera recording time, not the local download time.
+    visible.sort((a, b) => {
+      const aTime = Date.parse(a.recorded_at || a.modified);
+      const bTime = Date.parse(b.recorded_at || b.modified);
+
+      const safeA = Number.isNaN(aTime) ? 0 : aTime;
+      const safeB = Number.isNaN(bTime) ? 0 : bTime;
+
+      return clipSort === 'oldest'
+        ? safeA - safeB
+        : safeB - safeA;
+    });
 
     const parts = [];
     if (activeFilter) parts.push(`"${activeFilter}"`);
@@ -662,7 +711,9 @@
 
     visible.forEach(clip => {
       const li = document.createElement('li');
-      const date = new Date(clip.modified).toLocaleString();
+        const date = new Date(
+            clip.recorded_at || clip.modified
+        ).toLocaleString();
       const icon = clipIcon(clip);
       li.innerHTML = `
         <div class="clip-body">
