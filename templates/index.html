@@ -438,18 +438,20 @@
       card.className = 'camera-card';
       card.dataset.cameraName = cam.name;
       const safeName = cam.name.replace(/'/g, "\\'");
+      const thumbnailUrl = cam.media.thumbnail_url;
+      const motionEnabled = cam.status.motion_enabled;
       card.innerHTML = `
-        <div class="thumb-wrap" onclick="showCameraInPreview('${safeName}', '${cam.thumbnail_url}')">
-          <img class="thumb" src="${bust(cam.thumbnail_url)}"
+        <div class="thumb-wrap" onclick="showCameraInPreview('${safeName}', '${thumbnailUrl}')">
+          <img class="thumb" src="${bust(thumbnailUrl)}"
                onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
           <div class="no-thumb" style="display:none">No thumbnail yet — click ⟳ to capture</div>
           <button class="thumb-refresh" onclick="event.stopPropagation();refreshOneThumb('${safeName}')" title="Capture fresh image">⟳</button>
         </div>
         <div class="row">
           <span class="name">${cam.name}</span>
-          <button class="toggle ${cam.motion_enabled ? 'on' : 'off'}"
-                  onclick="event.stopPropagation();toggleCamera('${safeName}', ${!cam.motion_enabled})">
-            ${cam.motion_enabled ? 'ON' : 'OFF'}
+          <button class="toggle ${motionEnabled ? 'on' : 'off'}"
+                  onclick="event.stopPropagation();toggleCamera('${safeName}', ${motionEnabled})">
+            ${motionEnabled ? 'ON' : 'OFF'}
           </button>
         </div>
 		`;

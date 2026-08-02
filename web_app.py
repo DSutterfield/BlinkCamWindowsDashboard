@@ -74,16 +74,15 @@ def api_cameras():
 
         cameras = build_camera_records(blink)
 
-        # Compatibility fields used by the existing index.html.
-        # These can be removed after the Dashboard is updated to use
-        # the normalized status and capability sections directly.
+        # 2026-08-01 - Dan/Sage:
+        # Add web-specific media links without duplicating normalized camera
+        # status or capability fields at the top level of the API record.
         for camera in cameras:
-            camera["thumbnail_url"] = (
+            camera["media"] = {
+                "thumbnail_url": (
                 f"/static/thumbs/{thumb_filename(camera['raw_name'])}"
             )
-            camera["motion_enabled"] = (
-                camera["status"]["motion_enabled"]
-            )
+        }
 
         return {
             "system_armed": system_armed,
