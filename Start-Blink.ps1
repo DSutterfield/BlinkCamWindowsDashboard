@@ -2,11 +2,17 @@
 Start-Blink.ps1
 
 Starts the Blink clip poller and web dashboard, waits for the web server,
-and opens the dashboard in the default browser.
+and opens the dashboard in the default browser only when the dashboard
+process is newly started.
 
-Developer note — 2026-08-02, Dan and Sage:
+Developer note - 2026-08-02, Dan and Sage:
 The script uses $PSScriptRoot so it works from the repository directory
 without hard-coded project paths.
+
+Developer note - 2026-08-03, Dan and Sage:
+Start-PythonScript now returns whether it started a new process.
+The browser is opened only when the web dashboard is newly started,
+preventing duplicate browser windows during repeated startup requests.
 #>
 
 Set-StrictMode -Version Latest
@@ -47,7 +53,7 @@ function Start-PythonScript {
 
     if (Test-PythonScriptRunning -ScriptPath $ScriptPath) {
         Write-Host "$Name is already running."
-        return
+        return $false
     }
 
     Write-Host "Starting $Name..."
@@ -59,6 +65,8 @@ function Start-PythonScript {
         -WindowStyle Minimized
 
     Start-Sleep -Seconds 1
+
+    return $true
 }
 
 if (-not (Test-Path $pythonExe)) {
@@ -77,16 +85,16 @@ Write-Host
 Write-Host 'Blink DVR startup'
 Write-Host '-----------------'
 
-Start-PythonScript `
+$pollerStarted = Start-PythonScript `
     -Name 'Clip poller' `
     -ScriptPath $pollerScript
 
-Start-PythonScript `
+$webStarted = Start-PythonScript `
     -Name 'Web dashboard' `
     -ScriptPath $webScript
 
 Write-Host
-Write-Host 'Waiting for the dashboard...'
+Write-Host 'Checking the dashboard...'
 
 $serverReady = $false
 
@@ -112,6 +120,11 @@ if (-not $serverReady) {
 }
 
 Write-Host 'Dashboard is ready.'
-Write-Host "Opening $dashboardUrl"
 
-Start-Process $dashboardUrl
+if ($webStarted) {
+    Write-Host "Opening $dashboardUrl"
+    Start-Process $dashboardUrl
+}
+else {
+    Write-Host 'Dashboard was already running; browser not opened.'
+}
