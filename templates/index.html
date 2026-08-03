@@ -674,18 +674,18 @@
       });
     }
 
-    // Sort by the camera recording time, not the local download time.
-    visible.sort((a, b) => {
-      const aTime = Date.parse(a.recorded_at || a.modified);
-      const bTime = Date.parse(b.recorded_at || b.modified);
+      // Sort by the camera recording time, not the local download time.
+      visible.sort((a, b) => {
+          const aTime = Date.parse(a.recorded_at || a.modified);
+          const bTime = Date.parse(b.recorded_at || b.modified);
 
-      const safeA = Number.isNaN(aTime) ? 0 : aTime;
-      const safeB = Number.isNaN(bTime) ? 0 : bTime;
+          const safeA = Number.isNaN(aTime) ? 0 : aTime;
+          const safeB = Number.isNaN(bTime) ? 0 : bTime;
 
-      return clipSort === 'oldest'
-        ? safeA - safeB
-        : safeB - safeA;
-    });
+          return clipSort === 'oldest'
+              ? safeA - safeB
+              : safeB - safeA;
+      });
 
     const parts = [];
     if (activeFilter) parts.push(`"${activeFilter}"`);
