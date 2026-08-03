@@ -240,6 +240,7 @@ def api_clips():
 
         clip_data = {
             "filename": mp4.name,
+            "camera_name": "Unknown camera",
             "size_mb": round(stat.st_size / 1_000_000, 2),
 
             # Actual camera recording time whenever available.
@@ -257,6 +258,10 @@ def api_clips():
         }
 
         if sidecar:
+            clip_data["camera_name"] = (
+                sidecar.get("device_name")
+                or "Unknown camera"
+            )
             clip_data["source"] = sidecar.get("source")
             clip_data["cv_detection"] = sidecar.get(
                 "cv_detection",

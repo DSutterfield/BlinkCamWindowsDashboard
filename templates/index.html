@@ -717,7 +717,10 @@
       const icon = clipIcon(clip);
       li.innerHTML = `
         <div class="clip-body">
-          <div class="filename"><span class="clip-icon" title="${clipTitle(clip)}">${icon}</span> ${clip.filename}</div>
+          <div class="filename" title="${clip.filename}">
+            <span class="clip-icon" title="${clipTitle(clip)}">${icon}</span>
+            ${clip.camera_name || 'Unknown camera'}
+          </div>
           <div class="meta">${date} · ${clip.size_mb} MB</div>
         </div>
         <button class="clip-delete-btn" title="Delete this clip">🗑</button>
