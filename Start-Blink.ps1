@@ -10,9 +10,13 @@ The script uses $PSScriptRoot so it works from the repository directory
 without hard-coded project paths.
 
 Developer note - 2026-08-03, Dan and Sage:
-Start-PythonScript now returns whether it started a new process.
-The browser is opened only when the web dashboard is newly started,
-preventing duplicate browser windows during repeated startup requests.
+Start-PythonScript returns whether it started a new process. The browser
+opens only when the web dashboard is newly started.
+
+Developer note - 2026-08-03, Dan and Sage:
+The Python processes now run with hidden windows. Standard output and
+standard error are redirected to timestamped files in the logs directory.
+Python's -u option keeps diagnostic output unbuffered and current.
 #>
 
 Set-StrictMode -Version Latest
@@ -22,6 +26,7 @@ $projectRoot = $PSScriptRoot
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
 $pollerScript = Join-Path $projectRoot 'blink_dvr.py'
 $webScript = Join-Path $projectRoot 'web_app.py'
+$logDirectory = Join-Path $projectRoot 'logs'
 $dashboardUrl = 'http://127.0.0.1:5000'
 
 function Test-PythonScriptRunning {
@@ -48,7 +53,10 @@ function Start-PythonScript {
         [string]$Name,
 
         [Parameter(Mandatory)]
-        [string]$ScriptPath
+        [string]$ScriptPath,
+
+        [Parameter(Mandatory)]
+        [string]$LogName
     )
 
     if (Test-PythonScriptRunning -ScriptPath $ScriptPath) {
@@ -56,13 +64,27 @@ function Start-PythonScript {
         return $false
     }
 
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $outputLog = Join-Path `
+        $logDirectory `
+        "${LogName}_${timestamp}.out.log"
+
+    $errorLog = Join-Path `
+        $logDirectory `
+        "${LogName}_${timestamp}.err.log"
+
     Write-Host "Starting $Name..."
 
     Start-Process `
         -FilePath $pythonExe `
-        -ArgumentList "`"$ScriptPath`"" `
+        -ArgumentList "-u `"$ScriptPath`"" `
         -WorkingDirectory $projectRoot `
-        -WindowStyle Minimized
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $outputLog `
+        -RedirectStandardError $errorLog
+
+    Write-Host "  Output log: $outputLog"
+    Write-Host "  Error log:  $errorLog"
 
     Start-Sleep -Seconds 1
 
@@ -81,17 +103,27 @@ if (-not (Test-Path $webScript)) {
     throw "Web server not found: $webScript"
 }
 
+if (-not (Test-Path $logDirectory)) {
+    New-Item `
+        -ItemType Directory `
+        -Path $logDirectory `
+        -Force |
+        Out-Null
+}
+
 Write-Host
 Write-Host 'Blink DVR startup'
 Write-Host '-----------------'
 
 $pollerStarted = Start-PythonScript `
     -Name 'Clip poller' `
-    -ScriptPath $pollerScript
+    -ScriptPath $pollerScript `
+    -LogName 'blink_dvr'
 
 $webStarted = Start-PythonScript `
     -Name 'Web dashboard' `
-    -ScriptPath $webScript
+    -ScriptPath $webScript `
+    -LogName 'web_app'
 
 Write-Host
 Write-Host 'Checking the dashboard...'
