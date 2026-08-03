@@ -20,6 +20,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="config\settings.ini" />
+    <Content Include="Create-BlinkShortcuts.ps1" />
+    <Content Include="Get-BlinkStatus.ps1" />
     <Content Include="img\img.jpg" />
     <Content Include="requirements.txt" />
     <Content Include="static\thumbs\Mini___black.jpg" />
@@ -27,7 +29,9 @@
     <Content Include="static\thumbs\Outdoor_4___back_door.jpg" />
     <Content Include="static\thumbs\Outdoor_4___car.jpg" />
     <Content Include="static\thumbs\Outdoor_4___front.jpg" />
+    <Content Include="Stop-Blink.ps1" />
     <Content Include="templates\index.html" />
+    <Content Include="Start-Blink.ps1" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="arm_control.py" />
