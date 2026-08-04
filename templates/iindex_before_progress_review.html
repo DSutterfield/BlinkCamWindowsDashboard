@@ -311,14 +311,14 @@
     <h2>Cameras</h2>
     <div id="camera-list">Loading...</div>
 
-    <button class="refresh-btn" onclick="refreshAllThumbs(this)">Refresh All Thumbnails</button>
+    <button class="refresh-btn" onclick="refreshAllThumbs()">Refresh All Thumbnails</button>
     <button class="refresh-btn" onclick="loadCameras()">Reload Camera List</button>
   </div>
 
   <!-- CENTER: preview (image OR video) -->
   <div class="panel preview">
       <div class="view-area">
-          <video id="video-player" style="display:none"></video>
+          <video id="video-player" controls style="display:none"></video>
           <img id="preview-img" class="preview-img" style="display:none" alt="">
           <div id="placeholder" class="placeholder">Click a camera or clip to view</div>
       </div>
@@ -438,14 +438,9 @@
 
 
   (function initSettings() {
-    // 2026-08-04 - Dan/Sage:
-    // Recorded clips must stop at the end. Remove any saved loop setting
-    // left behind by the earlier, interrupted progress-bar changes.
-    const video = document.getElementById('video-player');
-    video.controls = false;
-    video.removeAttribute('controls');
-    video.loop = false;
-    localStorage.removeItem('blink_loop');
+    const saved = localStorage.getItem('blink_loop');
+    const enabled = saved === null ? true : saved === '1';
+    document.getElementById('video-player').loop = enabled;
 
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
@@ -532,7 +527,7 @@
         <div class="row">
           <span class="name">${cam.name}</span>
           <button class="toggle ${motionEnabled ? 'on' : 'off'}"
-                  onclick="event.stopPropagation();toggleCamera('${safeName}', ${!motionEnabled})">
+                  onclick="event.stopPropagation();toggleCamera('${safeName}', ${motionEnabled})">
             ${motionEnabled ? 'ON' : 'OFF'}
           </button>
         </div>
@@ -558,7 +553,8 @@
     setTimeout(loadCameras, 1500);
   }
 
-  async function refreshAllThumbs(btn) {
+  async function refreshAllThumbs() {
+    const btn = event.target;
     btn.disabled = true; btn.textContent = 'Refreshing... (this takes ~15 sec)';
     try {
       await fetch('/api/refresh_thumbnails', {method: 'POST'});
@@ -574,30 +570,6 @@
   }
 
   // --- Center pane preview ----------------------------------------------
-  /*
-    Developer note - 2026-08-04, Dan and Sage:
-    Keep all recorded-clip shutdown work in one function. Camera selection,
-    Clear, and clip-to-clip changes now use the same dependable reset path.
-  */
-  function stopClipPlayback() {
-    const video = document.getElementById('video-player');
-
-    video.pause();
-    hideClipProgress();
-
-    if (video.readyState > 0) {
-      try {
-        video.currentTime = 0;
-      } catch (e) {
-        // Some browsers reject currentTime changes while media is unloading.
-      }
-    }
-
-    video.removeAttribute('src');
-    video.load();
-    video.style.display = 'none';
-  }
-
   function showCameraInPreview(name, thumbnailUrl) {
     const video = document.getElementById('video-player');
     const img = document.getElementById('preview-img');
@@ -605,7 +577,16 @@
     const info = document.getElementById('info-text');
     const clearBtn = document.getElementById('clear-preview');
 
-    stopClipPlayback();
+    video.pause();
+    hideClipProgress();
+
+    if (video.readyState > 0) {
+        video.currentTime = 0;
+    }
+
+    video.removeAttribute('src');
+    video.load();
+    video.style.display = 'none';
 
     img.src = bust(thumbnailUrl);
     img.style.display = 'block';
@@ -625,9 +606,9 @@
     });
 
     document.querySelectorAll('#clip-list li').forEach(el => {
-      el.classList.remove('active');
+        el.classList.remove('active');
     });
-  }
+    }
 
   function playClip(filename, li) {
     const video = document.getElementById('video-player');
@@ -636,23 +617,14 @@
     const info = document.getElementById('info-text');
     const clearBtn = document.getElementById('clear-preview');
 
-    // Stop and unload any previously selected clip before loading another.
-    stopClipPlayback();
-    video.loop = false;
-
     img.style.display = 'none';
     img.removeAttribute('src');
 
     video.src = `/clips/${encodeURIComponent(filename)}`;
-    video.load();
     video.style.display = 'block';
     placeholder.style.display = 'none';
     showClipProgress();
-
-    const playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(e => console.error('Clip playback failed:', e));
-    }
+    video.play();
 
     info.textContent = `🎬 ${filename}`;
     clearBtn.classList.add('visible');
@@ -765,11 +737,10 @@
         updateClipProgress
     );
 
-    videoPlayer.addEventListener('ended', () => {
-        // Be explicit: leave the clip parked at its end; do not recycle it.
-        videoPlayer.pause();
-        updateClipProgress();
-    });
+    videoPlayer.addEventListener(
+        'ended',
+        updateClipProgress
+    );
 
     function clearPreview() {
         const video = document.getElementById('video-player');
@@ -779,7 +750,16 @@
         const clearBtn = document.getElementById('clear-preview');
 
         // Stop and reset any recorded clip currently playing.
-        stopClipPlayback();
+        video.pause();
+        hideClipProgress();
+
+        if (video.readyState > 0) {
+            video.currentTime = 0;
+        }
+
+        video.removeAttribute('src');
+        video.load();
+        video.style.display = 'none';
 
         // Remove any camera preview image.
         img.style.display = 'none';

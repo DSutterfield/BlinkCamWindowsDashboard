@@ -90,12 +90,13 @@ def match_event_to_file(event: dict, mp4_files: list) -> Optional[Path]:
     if not device_name:
         return None
 
-    # Normalize the camera name to match blinkpy's lowercase-with-dashes
-    device_slug = (
-        device_name.lower()
-        .replace(" - ", "-")
-        .replace(" ", "-")
-    )
+    # Normalize camera names to the filename form used by downloaded clips.
+    # Convert spaces, slashes, punctuation, and repeated separators to one dash.
+    device_slug = re.sub(
+        r"[^a-z0-9]+",
+        "-",
+        device_name.lower(),
+    ).strip("-")
 
     best_match = None
     best_delta = None
