@@ -3,6 +3,7 @@ Blink DVR Web Dashboard
 Run: python web_app.py
 Access: http://localhost:5000 (or http://<your-pc-ip>:5000 on LAN)
 """
+import atexit
 import asyncio
 from camera_model import build_camera_records
 import configparser
@@ -16,7 +17,15 @@ from pathlib import Path
 from threading import Lock
 
 from aiohttp import ClientSession
-from flask import Flask, jsonify, render_template, send_from_directory, request
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+)
+from liveview_bridge import LiveViewBridge
 from blinkpy.blinkpy import Blink
 from blinkpy.auth import Auth
 
@@ -34,6 +43,12 @@ CLIPS_DIR = Path(config["download"]["output_dir"])
 
 app = Flask(__name__)
 blink_lock = Lock()
+
+# 2026-08-04 - Dan/Sage:
+# Keep one live-view bridge alive for the Dashboard process. The bridge
+# owns its own asyncio loop and permits one active camera stream at a time.
+liveview_bridge = LiveViewBridge()
+atexit.register(liveview_bridge.shutdown)
 
 
 def run_async(coro):
@@ -64,6 +79,75 @@ def api_active_motion():
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+# --- Live-view routes -----------------------------------------------------
+@app.route("/api/liveview/start", methods=["POST"])
+def api_liveview_start():
+    """Start one camera's live view and wait for the first decoded frame."""
+    payload = request.get_json(silent=True) or {}
+    camera_name = str(payload.get("name", "")).strip()
+
+    if not camera_name:
+        return jsonify({
+            "ok": False,
+            "error": "A camera name is required.",
+        }), 400
+
+    try:
+        result = liveview_bridge.start(camera_name)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": str(exc),
+        }), 500
+
+
+@app.route("/api/liveview/stream")
+def api_liveview_stream():
+    """Publish the active camera as a browser-compatible MJPEG stream."""
+    status = liveview_bridge.status()
+
+    # 2026-08-04 - Dan/Sage:
+    # Permit the browser to receive the final decoded frame when Blink's
+    # short live-view feed ends before the MJPEG request reaches Flask.
+    if not status["active"] and status["frames"] == 0:
+        return jsonify({
+            "ok": False,
+            "error": status["error"] or "No live-view frames are available.",
+        }), 409
+
+    return Response(
+        liveview_bridge.iter_mjpeg(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.route("/api/liveview/status")
+def api_liveview_status():
+    """Return the current live-view camera, frame count, and error state."""
+    return jsonify(liveview_bridge.status())
+
+
+@app.route("/api/liveview/stop", methods=["POST"])
+def api_liveview_stop():
+    """Stop the active live-view stream without closing the Dashboard."""
+    try:
+        liveview_bridge.stop()
+        return jsonify({
+            "ok": True,
+            "active": False,
+        })
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": str(exc),
+        }), 500
 
 
 @app.route("/api/cameras")

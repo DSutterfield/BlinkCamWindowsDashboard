@@ -343,11 +343,26 @@
 
       <div class="info-bar">
           <span id="info-text">No selection</span>
-          <button class="clear-btn"
-                  id="clear-preview"
-                  onclick="clearPreview()">
-              ✕ Clear
-          </button>
+
+          <div style="display: flex; gap: 0.4rem;">
+              <button class="clear-btn"
+                      id="start-liveview"
+                      onclick="startLiveView()">
+                  ▶ Start Live View
+              </button>
+
+              <button class="clear-btn"
+                      id="stop-liveview"
+                      onclick="stopLiveView()">
+                  ■ Stop Live View
+              </button>
+
+              <button class="clear-btn"
+                      id="clear-preview"
+                      onclick="clearPreview()">
+                  ✕ Clear
+              </button>
+          </div>
       </div>
   </div>
 
@@ -423,6 +438,8 @@
    let activeFilter = "";
    let dateStart = null;
    let dateEnd = null;
+   let selectedCameraName = null;
+   let selectedCameraThumbnailUrl = null;
 
     // 2026-08-02 - Dan/Sage:
     // Preserve the operator's preferred clip order between browser sessions.
@@ -599,37 +616,169 @@
   }
 
   function showCameraInPreview(name, thumbnailUrl) {
-    const video = document.getElementById('video-player');
-    const img = document.getElementById('preview-img');
-    const placeholder = document.getElementById('placeholder');
-    const info = document.getElementById('info-text');
-    const clearBtn = document.getElementById('clear-preview');
+        const img = document.getElementById('preview-img');
+        const placeholder = document.getElementById('placeholder');
+        const info = document.getElementById('info-text');
+        const startBtn = document.getElementById('start-liveview');
+        const stopBtn = document.getElementById('stop-liveview');
+        const clearBtn = document.getElementById('clear-preview');
 
-    stopClipPlayback();
+        stopClipPlayback();
 
-    img.src = bust(thumbnailUrl);
-    img.style.display = 'block';
-    placeholder.style.display = 'none';
+        selectedCameraName = name;
+        selectedCameraThumbnailUrl = thumbnailUrl;
 
-    info.textContent = `📷 ${name}`;
-    clearBtn.classList.add('visible');
+        img.src = bust(thumbnailUrl);
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
 
-    document.querySelectorAll('.camera-card').forEach(c => {
-        c.classList.remove('active');
-    });
+        info.textContent = `📷 ${name}`;
 
-    document.querySelectorAll('.camera-card').forEach(c => {
-        if (c.dataset.cameraName === name) {
-            c.classList.add('active');
+        startBtn.classList.add('visible');
+        stopBtn.classList.remove('visible');
+        clearBtn.classList.add('visible');
+
+        document.querySelectorAll('.camera-card').forEach(card => {
+            card.classList.toggle(
+                'active',
+                card.dataset.cameraName === name
+            );
+        });
+
+        document.querySelectorAll('#clip-list li').forEach(item => {
+            item.classList.remove('active');
+        });
+    }
+
+  /*
+    Developer note - 2026-08-04, Dan and Sage:
+    Connect the Dashboard preview controls to the Flask live-view bridge.
+    Blink video is displayed as an MJPEG stream through preview-img.
+  */
+    async function startLiveView() {
+        if (!selectedCameraName) {
+            return;
         }
-    });
 
-    document.querySelectorAll('#clip-list li').forEach(el => {
-      el.classList.remove('active');
-    });
-  }
+        const img = document.getElementById('preview-img');
+        const placeholder = document.getElementById('placeholder');
+        const info = document.getElementById('info-text');
+        const startBtn = document.getElementById('start-liveview');
+        const stopBtn = document.getElementById('stop-liveview');
 
-  function playClip(filename, li) {
+        startBtn.disabled = true;
+        info.textContent = `⏳ Starting live view: ${selectedCameraName}`;
+
+        try {
+            const response = await fetch('/api/liveview/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: selectedCameraName
+                })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.ok) {
+                throw new Error(
+                    result.error || 'Live view could not be started.'
+                );
+            }
+
+            stopClipPlayback();
+
+            img.removeAttribute('src');
+            img.src = `/api/liveview/stream?t=${Date.now()}`;
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+
+            info.textContent = `🔴 Live: ${selectedCameraName}`;
+
+            startBtn.classList.remove('visible');
+            stopBtn.classList.add('visible');
+        } catch (error) {
+            info.textContent = `⚠ Live view failed: ${error.message}`;
+
+            startBtn.classList.add('visible');
+            stopBtn.classList.remove('visible');
+        } finally {
+            startBtn.disabled = false;
+        }
+    }
+
+    const LIVEVIEW_COOLDOWN_MS = 45_000;
+    let liveviewCooldownTimer = null;
+
+
+    function beginLiveViewCooldown() {
+        const startBtn = document.getElementById('start-liveview');
+        const info = document.getElementById('info-text');
+
+        if (liveviewCooldownTimer !== null) {
+            clearTimeout(liveviewCooldownTimer);
+        }
+
+        startBtn.disabled = true;
+
+        // 2026-08-05 - Dan/Sage:
+        // Blink may reject or provide an incomplete stream when a new live-view
+        // request begins immediately after the previous session ends.
+        info.textContent =
+            '⏳ Blink is resetting. Live view will be available in about 45 seconds.';
+
+        liveviewCooldownTimer = setTimeout(() => {
+            liveviewCooldownTimer = null;
+            startBtn.disabled = false;
+
+            if (selectedCameraName) {
+                info.textContent = `📷 ${selectedCameraName}`;
+            }
+        }, LIVEVIEW_COOLDOWN_MS);
+    }
+
+
+    async function stopLiveView() {
+        const img = document.getElementById('preview-img');
+        const info = document.getElementById('info-text');
+        const startBtn = document.getElementById('start-liveview');
+        const stopBtn = document.getElementById('stop-liveview');
+
+        stopBtn.disabled = true;
+        info.textContent = '⏳ Stopping live view';
+
+        try {
+            img.removeAttribute('src');
+
+            const response = await fetch('/api/liveview/stop', {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.ok) {
+                throw new Error(
+                    result.error || 'Live view could not be stopped.'
+                );
+            }
+
+            if (selectedCameraThumbnailUrl) {
+                img.src = bust(selectedCameraThumbnailUrl);
+                img.style.display = 'block';
+            }
+
+            startBtn.classList.add('visible');
+            stopBtn.classList.remove('visible');
+
+            beginLiveViewCooldown();
+        } catch (error) {
+            info.textContent = `⚠ Stop failed: ${error.message}`;
+        } finally {
+            stopBtn.disabled = false;
+        }
+    }
+
+    function playClip(filename, li) {
     const video = document.getElementById('video-player');
     const img = document.getElementById('preview-img');
     const placeholder = document.getElementById('placeholder');

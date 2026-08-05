@@ -41,6 +41,7 @@
     <Compile Include="capability_matrix.py" />
     <Compile Include="capability_probe.py" />
     <Compile Include="first_login.py" />
+    <Compile Include="liveview_bridge.py" />
     <Compile Include="liveview_raw.py" />
     <Compile Include="metadata_helper.py" />
     <Compile Include="mini_check.py" />
