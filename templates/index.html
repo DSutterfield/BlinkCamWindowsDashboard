@@ -120,6 +120,48 @@
   .preview video { width: 100%; height: 100%; object-fit: contain; background: #000; }
   .preview img.preview-img { width: 100%; height: 100%; object-fit: contain; background: #000; }
   .preview .placeholder { color: #555; font-size: 1.3rem; text-align: center; }
+    .preview .loading-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+    .preview .loading-overlay.visible {
+        display: flex;
+    }
+    .preview .loading-overlay::after {
+    content: "";
+    width: 48px;
+    height: 48px;
+    border: 5px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: preview-spinner-rotation 0.8s linear infinite;
+}
+        .preview .loading-overlay::after {
+            content: "";
+            width: 48px;
+            height: 48px;
+            border: 5px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: preview-spinner-rotation 0.8s linear infinite;
+        }
+
+    @keyframes preview-spinner-rotation {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+    .preview .loading-overlay.visible {
+    display: flex;
+}
+    .preview .loading-overlay.visible {
+    display: flex;
+}
   .preview .info-bar {
     padding: 0.6rem 1rem; background: #111; color: #aaa; font-size: 0.85rem;
     border-top: 1px solid #333;
@@ -320,6 +362,7 @@
       <div class="view-area">
           <video id="video-player" style="display:none"></video>
           <img id="preview-img" class="preview-img" style="display:none" alt="">
+          <div id="preview-loading" class="loading-overlay"></div>
           <div id="placeholder" class="placeholder">Click a camera or clip to view</div>
       </div>
 
@@ -660,7 +703,22 @@
     // an asynchronous Live View request.
     function waitForBrowserPaint() {
         return new Promise(resolve => requestAnimationFrame(resolve));
-    }  async function startLiveView() {
+    }
+
+    // 2026-08-06 - Dan/Sage:
+    // Control the center-panel activity spinner.
+    function showPreviewLoading() {
+        document
+            .getElementById('preview-loading')
+            .classList.add('visible');
+    }
+
+    function hidePreviewLoading() {
+        document
+            .getElementById('preview-loading')
+            .classList.remove('visible');
+    }
+    async function startLiveView() {
         if (!selectedCameraName) {
             return;
         }
@@ -672,7 +730,14 @@
         const stopBtn = document.getElementById('stop-liveview');
 
         startBtn.disabled = true;
+
+        // 2026-08-06 - Dan/Sage:
+        // Hide Start Live View immediately after it is clicked.
+        // The Stop button appears only after Live View starts successfully.
+        startBtn.classList.remove('visible');
+
         info.textContent = `⏳ Starting live view: ${selectedCameraName}`;
+        showPreviewLoading();
 
         await waitForBrowserPaint();
 
@@ -710,6 +775,7 @@
             startBtn.classList.add('visible');
             stopBtn.classList.remove('visible');
         } finally {
+            hidePreviewLoading();
             startBtn.disabled = false;
         }
     }
@@ -752,7 +818,16 @@
         const stopBtn = document.getElementById('stop-liveview');
 
         stopBtn.disabled = true;
+
+        // 2026-08-06 - Dan/Sage:
+        // Hide Stop Live View immediately after it is clicked.
+        // Start Live View returns after the stop request completes.
+        stopBtn.classList.remove('visible');
+
         info.textContent = '⏳ Stopping live view';
+        showPreviewLoading();
+
+        await waitForBrowserPaint();
 
         try {
             img.removeAttribute('src');
@@ -781,29 +856,55 @@
         } catch (error) {
             info.textContent = `⚠ Stop failed: ${error.message}`;
         } finally {
+            hidePreviewLoading();
             stopBtn.disabled = false;
         }
     }
 
-    function playClip(filename, li) {
-    const video = document.getElementById('video-player');
-    const img = document.getElementById('preview-img');
-    const placeholder = document.getElementById('placeholder');
-    const info = document.getElementById('info-text');
-    const clearBtn = document.getElementById('clear-preview');
+    async function playClip(filename, li) {
+        const video = document.getElementById('video-player');
+        const img = document.getElementById('preview-img');
+        const placeholder = document.getElementById('placeholder');
+        const info = document.getElementById('info-text');
+        const clearBtn = document.getElementById('clear-preview');
+        const startBtn = document.getElementById('start-liveview');
+        const stopBtn = document.getElementById('stop-liveview');
 
-    // Stop and unload any previously selected clip before loading another.
-    stopClipPlayback();
-    video.loop = false;
+        // Stop and unload any previously selected clip before loading another.
+        stopClipPlayback();
+        video.loop = false;
 
-    img.style.display = 'none';
-    img.removeAttribute('src');
+        img.style.display = 'none';
+        img.removeAttribute('src');
 
-    video.src = `/clips/${encodeURIComponent(filename)}`;
-    video.load();
-    video.style.display = 'block';
-    placeholder.style.display = 'none';
-    showClipProgress();
+        video.style.display = 'block';
+        placeholder.style.display = 'none';
+        showClipProgress();
+        showPreviewLoading();
+
+        await waitForBrowserPaint();
+
+        // 2026-08-06 - Dan/Sage:
+        // Live View controls apply only to a selected camera,
+        // not while a recorded clip is displayed.
+        startBtn.classList.remove('visible');
+        stopBtn.classList.remove('visible');
+
+        // 2026-08-06 - Dan/Sage:
+        // Keep the center-panel spinner visible until the selected clip
+        // is ready for playback or loading fails.
+        const finishClipLoading = () => {
+            hidePreviewLoading();
+
+            video.removeEventListener('canplay', finishClipLoading);
+            video.removeEventListener('error', finishClipLoading);
+        };
+
+        video.addEventListener('canplay', finishClipLoading);
+        video.addEventListener('error', finishClipLoading);
+
+        video.src = `/clips/${encodeURIComponent(filename)}`;
+        video.load();
 
     const playPromise = video.play();
     if (playPromise !== undefined) {
