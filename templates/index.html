@@ -655,7 +655,12 @@
     Connect the Dashboard preview controls to the Flask live-view bridge.
     Blink video is displayed as an MJPEG stream through preview-img.
   */
-    async function startLiveView() {
+    // 2026-08-06 - Dan/Sage:
+    // Allow the browser to display a pending status change before beginning
+    // an asynchronous Live View request.
+    function waitForBrowserPaint() {
+        return new Promise(resolve => requestAnimationFrame(resolve));
+    }  async function startLiveView() {
         if (!selectedCameraName) {
             return;
         }
@@ -668,6 +673,8 @@
 
         startBtn.disabled = true;
         info.textContent = `⏳ Starting live view: ${selectedCameraName}`;
+
+        await waitForBrowserPaint();
 
         try {
             const response = await fetch('/api/liveview/start', {
