@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import Iterator
 
 from aiohttp import ClientSession
-from blinkpy import api
 from blinkpy.auth import Auth
 from blinkpy.blinkpy import Blink
 
@@ -79,13 +78,6 @@ class LiveViewBridge:
         self._session: ClientSession | None = None
         self._blink: Blink | None = None
         self._stream = None
-
-        # 2026-08-07 - Dan/Sage:
-        # Preserve the most recent Blink Live View command identifiers so diagnostic
-        # code can inspect Blink's command state after the local stream has stopped.
-        self._last_command_id: int | None = None
-        self._last_network_id: int | None = None
-
         self._feed_task: asyncio.Task | None = None
         self._frame_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
@@ -221,9 +213,6 @@ class LiveViewBridge:
 
             self._stream = await camera.init_livestream()
             await self._stream.start()
-
-            self._last_command_id = getattr(self._stream, "command_id", None)
-            self._last_network_id = getattr(camera, "network_id", None)
 
             with self._frame_condition:
                 self._camera_name = camera_name
@@ -406,61 +395,6 @@ class LiveViewBridge:
                 timeout=timeout,
             )
             return self._latest_frame
-        def last_command_status(self) -> dict:
-            """Return Blink's current status for the most recent Live View command."""
-            future = asyncio.run_coroutine_threadsafe(
-            self._last_command_status_async(),
-            self._loop,
-            )
-
-            return future.result(timeout=15)
-
-        async def _last_command_status_async(self) -> dict:
-            """Query Blink for the most recent Live View command state."""
-
-            if self._last_command_id is None or self._last_network_id is None:
-                return {
-                    "command_id": self._last_command_id,
-                    "network_id": self._last_network_id,
-                    "status_code": None,
-                    "state_condition": None,
-                    "state_stage": None,
-                    "command_found": False,
-                }
-
-            await self._ensure_blink_async()
-
-            if self._blink is None:
-                raise RuntimeError("Blink connection is unavailable.")
-
-            response = await api.request_command_status(
-                self._blink,
-                self._last_network_id,
-                self._last_command_id,
-            )
-
-            command = next(
-                (
-                    item
-                    for item in response.get("commands", [])
-                    if item.get("id") == self._last_command_id
-                ),
-                None,
-                )
-
-        return {
-            "command_id": self._last_command_id,
-            "network_id": self._last_network_id,
-            "status_code": response.get("status_code"),
-            "state_condition": (
-                command.get("state_condition") if command else None
-
-            ),
-        "state_stage": (
-            command.get("state_stage") if command else None
-            ),
-        "command_found": command is not None,
-    }
 
     def status(self) -> dict:
         """Return thread-safe bridge status for a future Flask status route."""
