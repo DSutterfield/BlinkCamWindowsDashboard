@@ -25,6 +25,24 @@ from liveview_bridge import LiveViewBridge
 CAMERA_NAME = "Well House"
 COOLDOWN_SECONDS = 20
 
+def show_command_status(label: str, bridge: LiveViewBridge) -> None:
+    """Print Blink's state for the most recent Live View command."""
+    try:
+        status = bridge.last_command_status()
+        print(
+            f"{label}: "
+            f"command={status['command_id']}, "
+            f"network={status['network_id']}, "
+            f"http_status={status['status_code']}, "
+            f"condition={status['state_condition']}, "
+            f"stage={status['state_stage']}, "
+            f"found={status['command_found']}"
+        )
+    except Exception as exc:
+        print(
+            f"{label}: command-status query failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
 
 def main() -> None:
     bridge = LiveViewBridge()
@@ -42,6 +60,10 @@ def main() -> None:
 
         input("\nLive View is running. Press Enter to STOP it...")
 
+        show_command_status("Before Stop", bridge)
+
+        input("\nLive View is running. Press Enter to STOP it...")
+
         stop_time = time.perf_counter()
         bridge.stop()
         stop_elapsed = time.perf_counter() - stop_time
@@ -50,6 +72,8 @@ def main() -> None:
             f"\nbridge.stop() completed after "
             f"{stop_elapsed:.2f} seconds."
         )
+
+        show_command_status("Immediately after Stop", bridge)
 
         print(f"\nWaiting {COOLDOWN_SECONDS} seconds before restart...")
         time.sleep(COOLDOWN_SECONDS)
