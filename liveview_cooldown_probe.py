@@ -24,7 +24,7 @@ from liveview_bridge import LiveViewBridge
 
 
 CAMERA_NAME = "Well House"
-COOLDOWN_SECONDS = 20
+COOLDOWN_SECONDS = 0
 
 
 def command_status(
