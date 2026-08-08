@@ -718,6 +718,7 @@
             .getElementById('preview-loading')
             .classList.remove('visible');
     }
+
     async function startLiveView() {
         if (!selectedCameraName) {
             return;
@@ -742,20 +743,51 @@
         await waitForBrowserPaint();
 
         try {
-            const response = await fetch('/api/liveview/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: selectedCameraName
-                })
-            });
+            let result = null;
 
-            const result = await response.json();
+            // 2026-08-08 - Dan/Sage:
+            // Blink sometimes returns an incomplete transport stream when Live View
+            // is restarted immediately after a previous session stops.
+            // Allow the first request immediately, but retry once after 5 seconds
+            // when the failure looks like the transient Blink/FFmpeg reset condition.
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    const response = await fetch('/api/liveview/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: selectedCameraName
+                        })
+                    });
 
-            if (!response.ok || !result.ok) {
-                throw new Error(
-                    result.error || 'Live view could not be started.'
-                );
+                    result = await response.json();
+
+                    if (!response.ok || !result.ok) {
+                        throw new Error(
+                            result.error || 'Live view could not be started.'
+                        );
+                    }
+
+                    break;
+                } catch (error) {
+                    const message = String(error.message || error).toLowerCase();
+
+                    const transientStartFailure =
+                        message.includes('timeouterror') ||
+                        message.includes('ffmpeg') ||
+                        message.includes('end of file') ||
+                        message.includes('ts packet') ||
+                        message.includes('codec parameters');
+
+                    if (!transientStartFailure || attempt === 2) {
+                        throw error;
+                    }
+
+                    info.textContent =
+                        '⏳ Blink is still resetting. Retrying live view in 5 seconds...';
+
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
             }
 
             stopClipPlayback();
@@ -779,37 +811,6 @@
             startBtn.disabled = false;
         }
     }
-
-    const LIVEVIEW_COOLDOWN_MS = 45_000;
-    let liveviewCooldownTimer = null;
-
-
-    function beginLiveViewCooldown() {
-        const startBtn = document.getElementById('start-liveview');
-        const info = document.getElementById('info-text');
-
-        if (liveviewCooldownTimer !== null) {
-            clearTimeout(liveviewCooldownTimer);
-        }
-
-        startBtn.disabled = true;
-
-        // 2026-08-05 - Dan/Sage:
-        // Blink may reject or provide an incomplete stream when a new live-view
-        // request begins immediately after the previous session ends.
-        info.textContent =
-            '⏳ Blink is resetting. Live view will be available in about 45 seconds.';
-
-        liveviewCooldownTimer = setTimeout(() => {
-            liveviewCooldownTimer = null;
-            startBtn.disabled = false;
-
-            if (selectedCameraName) {
-                info.textContent = `📷 ${selectedCameraName}`;
-            }
-        }, LIVEVIEW_COOLDOWN_MS);
-    }
-
 
     async function stopLiveView() {
         const img = document.getElementById('preview-img');
@@ -852,7 +853,15 @@
             startBtn.classList.add('visible');
             stopBtn.classList.remove('visible');
 
-            beginLiveViewCooldown();
+            // 2026-08-08 - Dan/Sage:
+            // Repeated cooldown-probe tests showed that Live View can be restarted
+            // successfully with no enforced delay after the previous session stops.
+            startBtn.disabled = false;
+
+            if (selectedCameraName) {
+                info.textContent = `📷 ${selectedCameraName}`;
+            }
+
         } catch (error) {
             info.textContent = `⚠ Stop failed: ${error.message}`;
         } finally {
