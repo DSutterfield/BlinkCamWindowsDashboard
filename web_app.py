@@ -339,6 +339,7 @@ def api_clips():
 
             "source": None,
             "cv_detection": [],
+            "watched": None,
         }
 
         if sidecar:
@@ -351,6 +352,7 @@ def api_clips():
                 "cv_detection",
                 [],
             )
+            clip_data["watched"] = sidecar.get("watched")
 
         clips.append(clip_data)
 

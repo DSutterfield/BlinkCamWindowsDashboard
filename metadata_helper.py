@@ -36,7 +36,9 @@ def event_to_sidecar(event: dict) -> dict:
         "device_name": event.get("device_name"),
         "device_type": event.get("device"),
         "created_at": event.get("created_at"),
-        "source": event.get("source"),  # cv_motion / pir / snapshot
+        "updated_at": event.get("updated_at"),
+        "watched": event.get("watched"),
+        "source": event.get("source"),
         "type": event.get("type"),
         "cv_detection": meta["cv_detection"],
         "duration_ms": meta["pts_length_ms"],

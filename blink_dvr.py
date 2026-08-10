@@ -82,6 +82,7 @@ async def download_new_clips(blink):
     from datetime import datetime, timedelta, timezone
     from metadata_helper import (
         metadata_path_for,
+        read_sidecar,
         write_sidecar,
         match_event_to_file,
     )
@@ -91,7 +92,51 @@ async def download_new_clips(blink):
     )
     log.info(f"Polling for clips since {since} UTC")
 
-    await blink.get_videos_metadata()
+    events = await blink.get_videos_metadata(since=since, stop=10)
+
+    # 2026-08-10 - Dan/Sage:
+    # Refresh mutable Blink review status in existing sidecars.
+    # Match by Blink event ID so we do not rely on filename timestamps.
+    events_by_id = {
+        event.get("id"): event
+        for event in events
+        if event.get("id") is not None
+    }
+
+    status_updates = 0
+
+    for mp4 in OUTPUT_DIR.glob("*.mp4"):
+        sidecar = read_sidecar(mp4)
+        if not sidecar:
+            continue
+
+        event = events_by_id.get(sidecar.get("id"))
+        if not event:
+            continue
+
+        changed = False
+
+        if "watched" in event and sidecar.get("watched") != event.get("watched"):
+            sidecar["watched"] = event.get("watched")
+            changed = True
+
+        if (
+            "updated_at" in event
+            and sidecar.get("updated_at") != event.get("updated_at")
+        ):
+            sidecar["updated_at"] = event.get("updated_at")
+            changed = True
+
+        if changed:
+            metadata_path_for(mp4).write_text(
+                json.dumps(sidecar, indent=2)
+            )
+            status_updates += 1
+
+    if status_updates:
+        log.info(
+            f"Refreshed review status in {status_updates} sidecar(s)"
+        )
 
     before = set(OUTPUT_DIR.rglob("*.mp4"))
 
