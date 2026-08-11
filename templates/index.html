@@ -302,6 +302,19 @@
   .clips-list-wrap .filename { font-weight: 600; word-break: break-all; }
   .clips-list-wrap .meta { color: #888; font-size: 0.72rem; margin-top: 0.2rem; }
 
+    /* 2026-08-11 - Dan/Sage:
+   Persistent Blink-style indicator for an unviewed clip.
+   Viewing the clip marks it as viewed.
+    */
+    .clip-unviewed-indicator {
+        flex: 0 0 auto;
+        width: 0.7rem;
+        height: 0.7rem;
+        margin: 0 0.35rem;
+        border-radius: 50%;
+        background: #ff8c00;
+    }
+
   /* Per-clip delete button */
   .clip-delete-btn {
     flex: 0 0 auto;
@@ -870,7 +883,7 @@
         }
     }
 
-    async function playClip(filename, li) {
+       async function playClip(filename, li, clip) {
         const video = document.getElementById('video-player');
         const img = document.getElementById('preview-img');
         const placeholder = document.getElementById('placeholder');
@@ -878,6 +891,12 @@
         const clearBtn = document.getElementById('clear-preview');
         const startBtn = document.getElementById('start-liveview');
         const stopBtn = document.getElementById('stop-liveview');
+
+        video.onplaying = () => {
+          if (clip && clip.watched === false) {
+            markClipViewed(clip, li);
+          }
+         };
 
         // Stop and unload any previously selected clip before loading another.
         stopClipPlayback();
@@ -1183,6 +1202,10 @@
             clip.recorded_at || clip.modified
         ).toLocaleString();
       const icon = clipIcon(clip);
+      const unviewedIndicator = clip.watched === false
+        ? '<span class="clip-unviewed-indicator" title="Unviewed clip"></span>'
+        : '';
+
       li.innerHTML = `
         <div class="clip-body">
           <div class="filename" title="${clip.filename}">
@@ -1191,13 +1214,56 @@
           </div>
           <div class="meta">${date} · ${clip.size_mb} MB</div>
         </div>
+        ${unviewedIndicator}
         <button class="clip-delete-btn" title="Delete this clip">🗑</button>
       `;
-      li.onclick = () => playClip(clip.filename, li);
+      li.onclick = () => playClip(clip.filename, li, clip);
       li.querySelector('.clip-delete-btn').onclick = (e) => confirmDeleteClip(e, clip.filename);
       list.appendChild(li);
     });
   }
+
+    // 2026-08-11 - Dan/Sage:
+    // When playback begins, tell Blink that this clip has been viewed.
+    // Blink remains the authoritative source; the Flask endpoint also
+    // updates the local sidecar after Blink accepts the request.
+    async function markClipViewed(clip, li) {
+        if (!clip || clip.watched !== false || clip._markingViewed) {
+            return;
+        }
+
+        clip._markingViewed = true;
+
+        try {
+            const res = await fetch('/api/clips/mark-viewed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: clip.filename })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok || !data.ok) {
+                throw new Error(data.error || 'unknown error');
+            }
+
+            clip.watched = true;
+
+            const indicator = li.querySelector('.clip-unviewed-indicator');
+
+            if (indicator) {
+                indicator.remove();
+            }
+
+        } catch (e) {
+            console.error(
+                `Unable to mark ${clip.filename} as viewed:`,
+                e
+            );
+        } finally {
+            clip._markingViewed = false;
+        }
+    }
 
   // --- Delete a clip (with confirm second-chance cancel) ----------------
   async function confirmDeleteClip(event, filename) {

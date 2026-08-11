@@ -370,6 +370,85 @@ def api_clips():
 def serve_clip(filename):
     return send_from_directory(CLIPS_DIR, filename)
 
+# 2026-08-11 - Dan/Sage:
+# Mark one Blink media event as viewed. The Blink event ID is obtained
+# from the clip's sidecar so the browser does not have to know Blink IDs.
+@app.route("/api/clips/mark-viewed", methods=["POST"])
+def api_mark_clip_viewed():
+    from metadata_helper import metadata_path_for, read_sidecar
+
+    data = request.get_json(silent=True) or {}
+    filename = data.get("filename")
+
+    if not filename or filename != Path(filename).name:
+        return jsonify({"ok": False, "error": "Invalid filename"}), 400
+
+    if not filename.lower().endswith(".mp4"):
+        return jsonify({"ok": False, "error": "Not a clip file"}), 400
+
+    clips_dir = CLIPS_DIR.resolve()
+    target = (clips_dir / filename).resolve()
+
+    if clips_dir != target.parent:
+        return jsonify({"ok": False, "error": "Path escapes clips directory"}), 400
+
+    if not target.is_file():
+        return jsonify({"ok": False, "error": "Clip not found"}), 404
+
+    sidecar = read_sidecar(target)
+
+    if not sidecar:
+        return jsonify({"ok": False, "error": "Clip metadata not found"}), 404
+
+    event_id = sidecar.get("id")
+
+    if event_id is None:
+        return jsonify({"ok": False, "error": "Blink event ID not found"}), 400
+
+    async def mark_viewed(blink):
+        url = (
+            f"{blink.urls.base_url}/api/v4/accounts/{blink.account_id}"
+            f"/media/mark_as_viewed"
+        )
+
+        headers = dict(blink.auth.header)
+        headers["Content-Type"] = "application/json"
+
+        body = {
+            "media_list": [event_id]
+        }
+
+        await blink.auth.query(
+            url=url,
+            data=json.dumps(body),
+            headers=headers,
+            reqtype="post",
+            json_resp=False,
+        )
+
+        return {"ok": True}
+
+    try:
+        with blink_lock:
+            result = run_async(with_blink(mark_viewed))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Blink accepted the request. Update our local sidecar immediately.
+    sidecar["watched"] = True
+
+    try:
+        metadata_path_for(target).write_text(
+            json.dumps(sidecar, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as e:
+        return jsonify({
+            "ok": False,
+            "error": f"Blink was updated, but the sidecar update failed: {e}",
+        }), 500
+
+    return jsonify(result)
 
 @app.route("/api/clips/delete", methods=["POST"])
 def api_delete_clip():

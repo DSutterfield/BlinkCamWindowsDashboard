@@ -49,6 +49,7 @@
     <Compile Include="mini_check.py" />
     <Compile Include="motion_tracker.py" />
     <Compile Include="smart_detect_check.py" />
+    <Compile Include="watched_probe.py" />
     <Compile Include="web_app.py" />
   </ItemGroup>
   <ItemGroup>
