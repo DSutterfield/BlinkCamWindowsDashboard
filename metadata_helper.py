@@ -35,6 +35,14 @@ def event_to_sidecar(event: dict) -> dict:
         "id": event.get("id"),
         "device_name": event.get("device_name"),
         "device_type": event.get("device"),
+
+        # 2026-08-13 - Dan/Sage:
+        # Preserve the Blink system identity and recorded-clip thumbnail.
+        # These fields support the three-column Recorded Clips display.
+        "network_id": event.get("network_id"),
+        "network_name": event.get("network_name"),
+        "thumbnail": event.get("thumbnail"),
+
         "created_at": event.get("created_at"),
         "updated_at": event.get("updated_at"),
         "watched": event.get("watched"),

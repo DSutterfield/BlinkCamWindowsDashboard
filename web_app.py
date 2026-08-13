@@ -34,8 +34,16 @@ logging.getLogger("blinkpy").setLevel(logging.WARNING)
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "settings.ini"
 CREDS_PATH = ROOT / "config" / "credentials.json"
+
 THUMBS_DIR = ROOT / "static" / "thumbs"
 THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+
+# 2026-08-13 - Dan/Sage:
+# Cache recorded-clip thumbnails locally after their first retrieval
+# from Blink.  This prevents repeated cloud requests when the clip list
+# is refreshed or reopened.
+CLIP_THUMBS_DIR = ROOT / "static" / "clip_thumbs"
+CLIP_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
 
 config = configparser.ConfigParser()
 config.read(CONFIG_PATH)
@@ -218,6 +226,33 @@ def api_refresh_one_thumbnail(name):
     with blink_lock:
         return jsonify(run_async(with_blink(refresh)))
 
+@app.route("/api/clip_thumbnail/<path:filename>")
+def api_clip_thumbnail(filename):
+    """Return a locally cached recorded-clip thumbnail."""
+
+    # 2026-08-13 - Dan/Sage:
+    # The browser must never wait while this route contacts Blink.
+    # Blink thumbnail retrieval is handled separately by the DVR poller.
+    # If a thumbnail has not been cached yet, return immediately.
+    clips_root = CLIPS_DIR.resolve()
+    mp4 = (CLIPS_DIR / filename).resolve()
+
+    if mp4.parent != clips_root:
+        return Response(status=400)
+
+    cache_name = f"{mp4.stem}.jpg"
+    cache_path = CLIP_THUMBS_DIR / cache_name
+
+    if not cache_path.exists():
+        return Response(status=404)
+
+    return send_from_directory(
+        CLIP_THUMBS_DIR,
+        cache_name,
+        mimetype="image/jpeg",
+    )
+
+
 
 @app.route("/api/arm", methods=["POST"])
 def api_arm():
@@ -325,6 +360,7 @@ def api_clips():
         clip_data = {
             "filename": mp4.name,
             "camera_name": "Unknown camera",
+            "network_name": "Unknown system",
             "size_mb": round(stat.st_size / 1_000_000, 2),
 
             # Actual camera recording time whenever available.
@@ -347,6 +383,15 @@ def api_clips():
                 sidecar.get("device_name")
                 or "Unknown camera"
             )
+
+            # 2026-08-13 - Dan/Sage:
+            # Supply the Blink system/network name to the Recorded Clips
+            # display for the new three-column clip layout.
+            clip_data["network_name"] = (
+                sidecar.get("network_name")
+                or "Unknown system"
+            )
+           
             clip_data["source"] = sidecar.get("source")
             clip_data["cv_detection"] = sidecar.get(
                 "cv_detection",

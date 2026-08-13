@@ -186,6 +186,34 @@
   .clips-header h2 { margin-bottom: 0.6rem; }
   .clips-header .refresh-btn { margin-top: 0.5rem; }
 
+  /* 2026-08-13 - Dan/Sage:
+   Global count of unreviewed clips.
+   This count represents the complete clip collection, not just
+   clips currently visible through search or date filtering.
+  */
+    
+    .clips-title {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+    }
+
+    .unreviewed-count {
+        min-width: 1.65rem;
+        height: 1.65rem;
+        padding: 0 0.35rem;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: #ff8c00;
+        color: #111;
+        font-size: 0.75rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
   .search-wrap { position: relative; }
   .search-input {
     width: 100%; padding: 0.5rem 2rem 0.5rem 0.6rem;
@@ -301,6 +329,83 @@
   .clips-list-wrap .clip-body { flex: 1 1 auto; min-width: 0; }
   .clips-list-wrap .filename { font-weight: 600; word-break: break-all; }
   .clips-list-wrap .meta { color: #888; font-size: 0.72rem; margin-top: 0.2rem; }
+    /* 2026-08-13 - Dan/Sage:
+   Three-column Recorded Clips layout.
+   Left   = clip thumbnail
+   Middle = camera/system/date
+   Right  = viewed status/time/trigger/delete
+*/
+    
+
+    .clip-thumbnail-column {
+        flex: 0 0 4.5rem;
+        width: 4.5rem;
+        height: 3.2rem;
+        border-radius: 4px;
+        overflow: hidden;
+        background: #222;
+        border: 1px solid #3a3a3a;
+    }
+
+    .clip-thumbnail {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .clip-info-column {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .clip-camera-name {
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .clip-system-name {
+        margin-top: 0.25rem;
+        color: #999;
+        font-size: 0.72rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .clip-datetime {
+        margin-top: 0.15rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .clip-status-column {
+        flex: 0 0 auto;
+        min-width: 2.8rem;
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        justify-content: space-between;
+    }
+
+    .clip-status-top {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        white-space: nowrap;
+    }
+
+    .clip-time {
+        font-size: 0.78rem;
+    }
+
+    .clip-trigger {
+        min-height: 1rem;
+    }
 
     /* 2026-08-11 - Dan/Sage:
    Persistent Blink-style indicator for an unviewed clip.
@@ -310,7 +415,7 @@
         flex: 0 0 auto;
         width: 0.7rem;
         height: 0.7rem;
-        margin: 0 0.35rem;
+        margin: 0;
         border-radius: 50%;
         background: #ff8c00;
     }
@@ -321,7 +426,7 @@
     background: none; border: none; color: #777;
     cursor: pointer; font-size: 0.95rem; line-height: 1;
     padding: 0.15rem 0.35rem; border-radius: 3px;
-    opacity: 0;
+    opacity: 1;
     transition: opacity 0.15s, color 0.15s, background 0.15s;
   }
   .clips-list-wrap li:hover .clip-delete-btn { opacity: 1; }
@@ -425,7 +530,13 @@
   <!-- RIGHT: Clips with search + date filter -->
   <div class="panel clips">
       <div class="clips-header">
-          <h2>Recorded Clips</h2>
+          <h2 class="clips-title">
+              Recorded Clips
+              <span id="unreviewed-count"
+                    class="unreviewed-count"
+                    title="Unreviewed clips"
+                    style="display:none;">0</span>
+          </h2>
 
           <div class="search-wrap">
               <input type="text" id="search-input" class="search-input"
@@ -1097,6 +1208,7 @@
     try {
       const res = await fetch('/api/clips?t=' + Date.now());
       allClips = await res.json();
+      updateUnreviewedCount();
       renderClips();
 
       if (btn) {
@@ -1114,6 +1226,31 @@
       console.error('loadClips failed:', e);
     }
   }
+
+  // 2026-08-13 - Dan/Sage:
+  // Show the total number of known unreviewed clips in the complete
+  // Recorded Clips collection.  Search/date filters do not affect this count.
+  function updateUnreviewedCount() {
+      const badge = document.getElementById('unreviewed-count');
+
+      if (!badge) {
+          return;
+      }
+
+      const count = allClips.filter(
+          clip => clip.watched === false
+      ).length;
+
+      badge.textContent = count;
+
+      if (count > 0) {
+          badge.style.display = 'inline-flex';
+          badge.title =
+              `${count} unreviewed clip${count === 1 ? '' : 's'}`;
+      } else {
+          badge.style.display = 'none';
+      }
+    }
 
   function clipIcon(clip) {
     const cv = clip.cv_detection || [];
@@ -1198,25 +1335,65 @@
 
     visible.forEach(clip => {
       const li = document.createElement('li');
-        const date = new Date(
+        // 2026-08-13 - Dan/Sage:
+        // Display each recorded clip in a compact three-column layout modeled
+        // after the Blink app.  A thumbnail placeholder is used for now;
+        // actual clip thumbnails will be added as a separate step.
+        const recordedAt = new Date(
             clip.recorded_at || clip.modified
-        ).toLocaleString();
-      const icon = clipIcon(clip);
-      const unviewedIndicator = clip.watched === false
-        ? '<span class="clip-unviewed-indicator" title="Unviewed clip"></span>'
-        : '';
+        );
 
-      li.innerHTML = `
-        <div class="clip-body">
-          <div class="filename" title="${clip.filename}">
-            <span class="clip-icon" title="${clipTitle(clip)}">${icon}</span>
-            ${clip.camera_name || 'Unknown camera'}
-          </div>
-          <div class="meta">${date} · ${clip.size_mb} MB</div>
+        const clipDate = recordedAt.toLocaleDateString();
+        const clipTime = recordedAt.toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit'
+        });
+
+        const icon = clipIcon(clip);
+
+        const unviewedIndicator = clip.watched === false
+            ? '<span class="clip-unviewed-indicator" title="Unviewed clip"></span>'
+            : '';
+
+        li.innerHTML = `
+          <div class="clip-thumbnail-column">
+            <img
+            class="clip-thumbnail"
+            src="/api/clip_thumbnail/${encodeURIComponent(clip.filename)}"
+            alt=""
+            loading="lazy"
+            onerror="this.style.display='none';"
+          >
         </div>
-        ${unviewedIndicator}
-        <button class="clip-delete-btn" title="Delete this clip">🗑</button>
-      `;
+
+            <div class="clip-info-column">
+                <div class="clip-camera-name" title="${clip.filename}">
+                  ${clip.camera_name || 'Unknown camera'}
+            </div>
+
+            <div class="clip-system-name">
+               ${clip.network_name || 'Unknown system'}
+            </div>
+
+            <div class="clip-datetime">
+                ${clipDate} · ${clipTime}
+            </div>
+        </div>
+
+        <div class="clip-status-column">
+          <div class="clip-status-top">
+            ${unviewedIndicator}
+            <button class="clip-delete-btn"
+                    title="Delete this clip">🗑</button>
+          </div>
+
+          <div class="clip-trigger"
+               title="${clipTitle(clip)}">
+            <span class="clip-icon">${icon}</span>
+          </div>
+        </div>
+       `;
+
       li.onclick = () => playClip(clip.filename, li, clip);
       li.querySelector('.clip-delete-btn').onclick = (e) => confirmDeleteClip(e, clip.filename);
       list.appendChild(li);
@@ -1248,6 +1425,11 @@
             }
 
             clip.watched = true;
+
+            // 2026-08-13 - Dan/Sage:
+            // Keep the global unreviewed-clip badge synchronized immediately
+            // when an individual clip is successfully marked as viewed.
+            updateUnreviewedCount();
 
             const indicator = li.querySelector('.clip-unviewed-indicator');
 

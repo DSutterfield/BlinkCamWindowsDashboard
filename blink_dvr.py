@@ -25,6 +25,13 @@ config = configparser.ConfigParser()
 config.read(CONFIG_PATH)
 
 OUTPUT_DIR = Path(config["download"]["output_dir"])
+
+# 2026-08-13 - Dan/Sage:
+# Recorded-clip thumbnails are cached locally by the DVR poller so
+# Dashboard playback never has to wait for a Blink thumbnail request.
+CLIP_THUMBS_DIR = ROOT / "static" / "clip_thumbs"
+CLIP_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+
 POLL_INTERVAL = int(config["download"]["poll_interval_seconds"])
 DELETE_AFTER_DAYS = int(config["download"]["delete_after_days"])
 LOG_DIR = Path(config["logging"]["log_dir"])
@@ -77,6 +84,47 @@ async def setup_blink(session):
 
     return blink
 
+async def cache_clip_thumbnail(blink, mp4, metadata):
+    """Cache one recorded-clip thumbnail locally if it is missing."""
+
+    thumbnail_path = metadata.get("thumbnail")
+    if not thumbnail_path:
+        return False
+
+    cache_path = CLIP_THUMBS_DIR / f"{mp4.stem}.jpg"
+
+    # Nothing to do if this thumbnail has already been cached.
+    if cache_path.exists():
+        return False
+
+    if thumbnail_path.startswith("http"):
+        url = thumbnail_path
+    else:
+        url = f"{blink.urls.base_url}{thumbnail_path}"
+
+    response = await blink.auth.query(
+        url=url,
+        headers=dict(blink.auth.header),
+        reqtype="get",
+        json_resp=False,
+    )
+
+    if response is None:
+        return False
+
+    try:
+        if response.status != 200:
+            return False
+
+        image_bytes = await response.read()
+
+        if not image_bytes:
+            return False
+
+        cache_path.write_bytes(image_bytes)
+        return True
+    finally:
+        response.release()
 
 async def download_new_clips(blink):
     from datetime import datetime, timedelta, timezone
@@ -105,37 +153,75 @@ async def download_new_clips(blink):
 
     status_updates = 0
 
-    for mp4 in OUTPUT_DIR.glob("*.mp4"):
+    # 2026-08-13 - Dan/Sage:
+    # Fill the recorded-clip thumbnail cache gradually so background
+    # Blink traffic never interferes with Dashboard clip playback.
+    thumbnail_cache_limit = 5
+    thumbnails_cached = 0
+
+    for mp4 in sorted(
+        OUTPUT_DIR.glob("*.mp4"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    ):
         sidecar = read_sidecar(mp4)
         if not sidecar:
             continue
 
         event = events_by_id.get(sidecar.get("id"))
-        if not event:
-            continue
 
-        changed = False
+        # Refresh metadata when Blink still returns this event.
+        if event:
+            changed = False
 
-        if "watched" in event and sidecar.get("watched") != event.get("watched"):
-            sidecar["watched"] = event.get("watched")
-            changed = True
+            for field in (
+                "network_id",
+                "network_name",
+                "thumbnail",
+            ):
+                if field in event and sidecar.get(field) != event.get(field):
+                    sidecar[field] = event.get(field)
+                    changed = True
 
-        if (
-            "updated_at" in event
-            and sidecar.get("updated_at") != event.get("updated_at")
-        ):
-            sidecar["updated_at"] = event.get("updated_at")
-            changed = True
+            if (
+                "watched" in event
+                and sidecar.get("watched") != event.get("watched")
+            ):
+                sidecar["watched"] = event.get("watched")
+                changed = True
 
-        if changed:
-            metadata_path_for(mp4).write_text(
-                json.dumps(sidecar, indent=2)
-            )
-            status_updates += 1
+            if (
+                "updated_at" in event
+                and sidecar.get("updated_at") != event.get("updated_at")
+            ):
+                sidecar["updated_at"] = event.get("updated_at")
+                changed = True
+
+            if changed:
+                metadata_path_for(mp4).write_text(
+                    json.dumps(sidecar, indent=2)
+                )
+                status_updates += 1
+
+        # Cache from the sidecar itself.  The Blink event does not have
+        # to still be present in the current metadata response.
+        if thumbnails_cached < thumbnail_cache_limit:
+            try:
+                if await cache_clip_thumbnail(blink, mp4, sidecar):
+                    thumbnails_cached += 1
+            except Exception as e:
+                log.warning(
+                    f"Thumbnail cache failed for {mp4.name}: {e}"
+                )
 
     if status_updates:
         log.info(
-            f"Refreshed review status in {status_updates} sidecar(s)"
+            f"Refreshed metadata in {status_updates} sidecar(s)"
+        )
+
+    if thumbnails_cached:
+        log.info(
+            f"Cached {thumbnails_cached} recorded-clip thumbnail(s)"
         )
 
     before = set(OUTPUT_DIR.rglob("*.mp4"))

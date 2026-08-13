@@ -62,11 +62,22 @@ async def get_recent_events(blink):
         datetime.now(timezone.utc) - timedelta(hours=24)
     ).strftime("%Y/%m/%d %H:%M:%S")
 
-    return await blink.get_videos_metadata(
+    events = await blink.get_videos_metadata(
         since=since,
         stop=10,
     )
 
+    # 2026-08-13 - Dan/Sage:
+    # Temporary diagnostic while determining whether Blink media events
+    # contain a system/network identifier needed by the clip-list display.
+    if events:
+        print("\nRaw Blink media-event fields:")
+        print(sorted(events[0].keys()))
+
+        print("\nFirst raw media event:")
+        print(json.dumps(events[0], indent=2, default=str))
+
+    return events
 
 async def find_event_by_id(blink, event_id):
     events = await get_recent_events(blink)
