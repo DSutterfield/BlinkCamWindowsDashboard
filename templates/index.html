@@ -832,13 +832,24 @@
     video.style.display = 'none';
   }
 
-  function showCameraInPreview(name, thumbnailUrl) {
+    async function showCameraInPreview(name, thumbnailUrl) {
         const img = document.getElementById('preview-img');
         const placeholder = document.getElementById('placeholder');
         const info = document.getElementById('info-text');
         const startBtn = document.getElementById('start-liveview');
         const stopBtn = document.getElementById('stop-liveview');
         const clearBtn = document.getElementById('clear-preview');
+
+        // 2026-08-14 - Dan/Sage:
+        // Camera-thumbnail selection now opens Live View directly.
+        // If another camera is already live, stop that session cleanly
+        // before selecting and starting the newly requested camera.
+        const liveViewWasActive =
+            stopBtn.classList.contains('visible');
+
+        if (liveViewWasActive) {
+            await stopLiveView();
+        }
 
         stopClipPlayback();
 
@@ -865,13 +876,17 @@
         document.querySelectorAll('#clip-list li').forEach(item => {
             item.classList.remove('active');
         });
+
+        // Start Live View immediately after camera selection.
+        // startLiveView() retains its existing retry and failure handling.
+        await startLiveView();
     }
 
-  /*
-    Developer note - 2026-08-04, Dan and Sage:
-    Connect the Dashboard preview controls to the Flask live-view bridge.
-    Blink video is displayed as an MJPEG stream through preview-img.
-  */
+
+    //Developer note - 2026-08-04, Dan and Sage:
+    //Connect the Dashboard preview controls to the Flask live-view bridge.
+    //Blink video is displayed as an MJPEG stream through preview-img.
+  
     // 2026-08-06 - Dan/Sage:
     // Allow the browser to display a pending status change before beginning
     // an asynchronous Live View request.
@@ -1044,7 +1059,7 @@
         }
     }
 
-       async function playClip(filename, li, clip) {
+    async function playClip(filename, li, clip) {
         const video = document.getElementById('video-player');
         const img = document.getElementById('preview-img');
         const placeholder = document.getElementById('placeholder');
@@ -1053,11 +1068,21 @@
         const startBtn = document.getElementById('start-liveview');
         const stopBtn = document.getElementById('stop-liveview');
 
+        // 2026-08-14 - Dan/Sage:
+        // A recorded clip takes ownership of the center preview.
+        // If Live View is active, stop it cleanly before loading the clip.
+        const liveViewWasActive =
+            stopBtn.classList.contains('visible');
+
+        if (liveViewWasActive) {
+            await stopLiveView();
+        }
+
         video.onplaying = () => {
-          if (clip && clip.watched === false) {
+            if (clip && clip.watched === false) {
             markClipViewed(clip, li);
-          }
-         };
+                }
+        };
 
         // Stop and unload any previously selected clip before loading another.
         stopClipPlayback();
@@ -1087,7 +1112,7 @@
 
             video.removeEventListener('canplay', finishClipLoading);
             video.removeEventListener('error', finishClipLoading);
-        };
+    };
 
         video.addEventListener('canplay', finishClipLoading);
         video.addEventListener('error', finishClipLoading);
