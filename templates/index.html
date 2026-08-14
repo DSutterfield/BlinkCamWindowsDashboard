@@ -111,6 +111,27 @@
   }
   .refresh-btn:hover { background: #446; }
 
+  .mark-all-viewed-btn {
+  width: 100%;
+  padding: 0.5rem;
+  margin-top: 1rem;
+  background: #5a4328;
+  color: #eee;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.mark-all-viewed-btn:hover {
+  background: #705536;
+}
+
+.mark-all-viewed-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
   /* CENTER: preview pane */
   .preview { padding: 0; display: flex; flex-direction: column; background: #000; }
   .preview .view-area {
@@ -587,6 +608,13 @@
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
           </select>
+
+          <button id="mark-all-viewed-btn"
+                  class="mark-all-viewed-btn"
+                  onclick="markAllClipsViewed()"
+                  title="Mark all unreviewed clips as reviewed">
+              Mark All Reviewed
+          </button>
 
           <button class="refresh-btn" onclick="loadClips()">Refresh List</button>
       </div>
@@ -1243,6 +1271,12 @@
 
       badge.textContent = count;
 
+      const markAllBtn = document.getElementById('mark-all-viewed-btn');
+
+      if (markAllBtn) {
+          markAllBtn.disabled = count === 0;
+      }
+
       if (count > 0) {
           badge.style.display = 'inline-flex';
           badge.title =
@@ -1252,23 +1286,116 @@
       }
     }
 
+// 2026-08-14 - Dan/Sage:
+// Mark every unreviewed clip in the complete clip collection as reviewed.
+// Search and date filters do not limit this operation.
+async function markAllClipsViewed() {
+    const btn = document.getElementById('mark-all-viewed-btn');
+
+    const count = allClips.filter(
+        clip => clip.watched === false
+    ).length;
+
+    if (count === 0) {
+        return;
+    }
+
+    const confirmed = confirm(
+        `Mark all ${count} unreviewed clips as reviewed?\n\n` +
+        `This includes unreviewed clips currently hidden by search or date filters.`
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    const originalText = btn.textContent;
+
+    btn.disabled = true;
+    btn.textContent = 'Marking...';
+
+    try {
+        const res = await fetch('/api/clips/mark-all-viewed', {
+            method: 'POST'
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+            throw new Error(data.error || 'Unable to mark clips reviewed');
+        }
+
+        allClips.forEach(clip => {
+            if (clip.watched === false) {
+                clip.watched = true;
+            }
+        });
+
+        updateUnreviewedCount();
+        renderClips();
+
+        btn.textContent = `✓ Marked ${data.marked}`;
+
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }, 1500);
+
+    } catch (e) {
+        console.error('Mark All Reviewed failed:', e);
+
+        btn.textContent = 'Error — try again';
+        btn.disabled = false;
+
+        // Reload from the sidecars in case Blink accepted only part
+        // of the operation before an error occurred.
+        await loadClips();
+    }
+  }
+
+  // 2026-08-14 - Dan/Sage:
+  // Display the event that triggered each recorded clip.
+  // Smart detections take precedence over generic motion.
   function clipIcon(clip) {
-    const cv = clip.cv_detection || [];
-    const hasPerson = cv.includes('person');
-    const hasVehicle = cv.includes('vehicle');
-    if (hasPerson && hasVehicle) return '🚶🚗';
-    if (hasPerson) return '🚶';
-    if (hasVehicle) return '🚗';
-    if (clip.source === 'cv_motion') return '👁️';   // CV ran, found nothing
-    if (clip.source === 'pir') return '〰️';         // basic motion (Minis)
-    if (clip.source === 'snapshot') return '📷';    // manual capture
-    return '❓';                                     // unknown / no metadata yet
+      const cv = clip.cv_detection || [];
+      const hasPerson = cv.includes('person');
+      const hasVehicle = cv.includes('vehicle');
+
+      if (hasPerson && hasVehicle) return '🚶🚗';
+      if (hasPerson) return '🚶';
+      if (hasVehicle) return '🚗';
+
+      if (
+          clip.source === 'cv_motion' ||
+          clip.source === 'pir'
+      ) {
+          return '〰️';
+      }
+
+      if (clip.source === 'snapshot') return '📷';
+
+      return '❓';
   }
 
   function clipTitle(clip) {
-    const cv = clip.cv_detection || [];
-    if (cv.length) return cv.join(' + ');
-    return clip.source || 'unknown';
+      const cv = clip.cv_detection || [];
+      const hasPerson = cv.includes('person');
+      const hasVehicle = cv.includes('vehicle');
+
+      if (hasPerson && hasVehicle) return 'Person + Vehicle';
+      if (hasPerson) return 'Person';
+      if (hasVehicle) return 'Vehicle';
+
+      if (
+          clip.source === 'cv_motion' ||
+          clip.source === 'pir'
+      ) {
+          return 'Motion';
+      }
+
+      if (clip.source === 'snapshot') return 'Snapshot';
+
+      return 'Unknown trigger';
   }
 
   function changeClipSort(value) {

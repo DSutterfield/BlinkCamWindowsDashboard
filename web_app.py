@@ -495,6 +495,119 @@ def api_mark_clip_viewed():
 
     return jsonify(result)
 
+@app.route("/api/clips/mark-all-viewed", methods=["POST"])
+def api_mark_all_clips_viewed():
+    """Mark every locally known unreviewed Blink clip as viewed."""
+
+    # 2026-08-14 - Dan/Sage:
+    # "Mark all" applies to the complete local clip collection,
+    # independent of the Dashboard's current search/date filters.
+    # Only sidecars explicitly reporting watched=False are included.
+    from metadata_helper import metadata_path_for, read_sidecar
+
+    pending = []
+
+    for mp4 in CLIPS_DIR.glob("*.mp4"):
+        sidecar = read_sidecar(mp4)
+
+        if not sidecar:
+            continue
+
+        if sidecar.get("watched") is not False:
+            continue
+
+        event_id = sidecar.get("id")
+
+        if event_id is None:
+            continue
+
+        pending.append((mp4, sidecar, event_id))
+
+    if not pending:
+        return jsonify({
+            "ok": True,
+            "marked": 0,
+        })
+
+    # Keep each request reasonably small rather than sending hundreds
+    # of Blink event IDs in one POST.
+    batch_size = 100
+    marked = 0
+
+    async def mark_batch(blink, event_ids):
+        url = (
+            f"{blink.urls.base_url}/api/v4/accounts/{blink.account_id}"
+            f"/media/mark_as_viewed"
+        )
+
+        headers = dict(blink.auth.header)
+        headers["Content-Type"] = "application/json"
+
+        body = {
+            "media_list": event_ids
+        }
+
+        response = await blink.auth.query(
+            url=url,
+            data=json.dumps(body),
+            headers=headers,
+            reqtype="post",
+            json_resp=False,
+        )
+
+        if response is None:
+            raise RuntimeError(
+                "Blink did not return a response."
+            )
+
+        try:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError(
+                    f"Blink returned HTTP {response.status}."
+                )
+        finally:
+            response.release()
+
+    try:
+        with blink_lock:
+            for start in range(0, len(pending), batch_size):
+                batch = pending[start:start + batch_size]
+                event_ids = [
+                    event_id
+                    for _, _, event_id in batch
+                ]
+
+                run_async(
+                    with_blink(
+                        lambda blink, ids=event_ids:
+                            mark_batch(blink, ids)
+                    )
+                )
+
+                # Blink accepted this batch. Update only those local
+                # sidecars that were included in the successful POST.
+                for mp4, sidecar, _ in batch:
+                    sidecar["watched"] = True
+
+                    metadata_path_for(mp4).write_text(
+                        json.dumps(sidecar, indent=2),
+                        encoding="utf-8",
+                    )
+
+                    marked += 1
+
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "marked": marked,
+        }), 500
+
+    return jsonify({
+        "ok": True,
+        "marked": marked,
+    })
+
 @app.route("/api/clips/delete", methods=["POST"])
 def api_delete_clip():
     """Delete a single downloaded clip (and its sidecar/thumbnail) from local disk.

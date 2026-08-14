@@ -14,6 +14,7 @@ from blinkpy.auth import Auth
 
 from metadata_helper import (
     metadata_path_for,
+    read_sidecar,
     write_sidecar,
     match_event_to_file,
 )
@@ -28,70 +29,107 @@ CLIPS_DIR = Path(config["download"]["output_dir"])
 
 
 async def fetch_all_events(blink, days_back: int = 90) -> list:
-    """Fetch as many event records as possible from the media-changed API."""
-    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime(
-        "%Y-%m-%dT%H:%M:%S+0000"
-    )
-    all_events = []
-    for page in range(1, 50):  # safety cap
-        url = (
-            f"{blink.urls.base_url}/api/v1/accounts/{blink.account_id}"
-            f"/media/changed?since={since}&page={page}"
-        )
-        response = await blink.auth.query(
-            url=url, headers=blink.auth.header, reqtype="get", json_resp=True
-        )
-        if not isinstance(response, dict):
-            break
-        page_events = response.get("media", [])
-        if not page_events:
-            break
-        all_events.extend(page_events)
-        print(f"  Page {page}: +{len(page_events)} events (total {len(all_events)})")
-    return all_events
+    """Fetch rich Blink media metadata for historical sidecar enrichment."""
 
+    since = (
+        datetime.now(timezone.utc) - timedelta(days=days_back)
+    ).strftime("%Y/%m/%d %H:%M:%S")
+
+    print(
+        f"  Fetching rich media metadata for the last "
+        f"{days_back} days..."
+    )
+
+    events = await blink.get_videos_metadata(
+        since=since,
+        stop=100,
+    )
+
+    print(f"  Retrieved {len(events)} Blink media events.")
+    return events
 
 async def main():
     print(f"Reading clips from: {CLIPS_DIR}")
+
     if not CLIPS_DIR.exists():
         print("Clip directory does not exist.")
         return
 
-    # Find all MP4s that don't have sidecars yet
     all_mp4s = list(CLIPS_DIR.glob("*.mp4"))
-    needs_sidecar = [m for m in all_mp4s if not metadata_path_for(m).exists()]
-    print(f"Found {len(all_mp4s)} MP4s; {len(needs_sidecar)} need sidecars.")
-
-    if not needs_sidecar:
-        print("Nothing to do.")
-        return
+    print(f"Found {len(all_mp4s)} MP4 files.")
 
     saved = json.loads(CREDS_PATH.read_text())
+
     async with ClientSession() as session:
         blink = Blink(session=session)
         blink.auth = Auth(saved, no_prompt=True, session=session)
         await blink.start()
 
-        print("\nFetching event history from Blink...")
+        print("\nFetching rich event history from Blink...")
         events = await fetch_all_events(blink, days_back=90)
-        print(f"Got {len(events)} total events from server.\n")
 
-        print("Matching events to local clips...")
-        matched = 0
-        for event in events:
-            mp4 = match_event_to_file(event, needs_sidecar)
-            if mp4:
-                write_sidecar(mp4, event)
-                matched += 1
+        events_by_id = {
+            event.get("id"): event
+            for event in events
+            if event.get("id") is not None
+        }
 
-        print(f"\nDone. Wrote {matched} sidecar files.")
-        unmatched = len(needs_sidecar) - matched
-        if unmatched:
-            print(
-                f"({unmatched} clips had no matching event — likely older "
-                f"than 90 days or naming mismatch.)"
-            )
+        print(
+            f"Got {len(events_by_id)} identifiable Blink events.\n"
+        )
 
+        updated_sidecars = 0
+        unchanged_sidecars = 0
+        no_matching_event = 0
+        no_sidecar = 0
+
+        fields_to_backfill = (
+            "network_id",
+            "network_name",
+            "thumbnail",
+        )
+
+        print("Enriching existing sidecars...")
+
+        for mp4 in all_mp4s:
+            sidecar = read_sidecar(mp4)
+
+            if not sidecar:
+                no_sidecar += 1
+                continue
+
+            event_id = sidecar.get("id")
+            event = events_by_id.get(event_id)
+
+            if not event:
+                no_matching_event += 1
+                continue
+
+            changed = False
+
+            for field in fields_to_backfill:
+                new_value = event.get(field)
+
+                if (
+                    new_value is not None
+                    and sidecar.get(field) != new_value
+                ):
+                    sidecar[field] = new_value
+                    changed = True
+
+            if changed:
+                metadata_path_for(mp4).write_text(
+                    json.dumps(sidecar, indent=2)
+                )
+                updated_sidecars += 1
+            else:
+                unchanged_sidecars += 1
+
+        print("\nBackfill complete.")
+        print(f"  Updated sidecars:     {updated_sidecars}")
+        print(f"  Already up to date:   {unchanged_sidecars}")
+        print(f"  No matching event:    {no_matching_event}")
+        print(f"  Missing sidecar:      {no_sidecar}")
 
 if __name__ == "__main__":
     asyncio.run(main())
