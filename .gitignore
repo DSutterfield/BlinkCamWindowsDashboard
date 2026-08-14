@@ -17,3 +17,5 @@ static/thumbs/*.jpg
 
 # Log files
 logs/
+# Generated recorded-clip thumbnail cache
+static/clip_thumbs/
