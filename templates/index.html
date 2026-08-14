@@ -132,6 +132,28 @@
   cursor: default;
 }
 
+.mark-all-spinner {
+    display: inline-block;
+    width: 0.9rem;
+    height: 0.9rem;
+    margin-right: 0.45rem;
+    vertical-align: -0.15rem;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: mark-all-spinner-rotation 0.8s linear infinite;
+}
+
+.mark-all-viewed-btn.busy:disabled {
+    opacity: 0.85;
+}
+
+@keyframes mark-all-spinner-rotation {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
   /* CENTER: preview pane */
   .preview { padding: 0; display: flex; flex-direction: column; background: #000; }
   .preview .view-area {
@@ -1312,7 +1334,9 @@ async function markAllClipsViewed() {
     const originalText = btn.textContent;
 
     btn.disabled = true;
-    btn.textContent = 'Marking...';
+    btn.classList.add('busy');
+    btn.innerHTML =
+        '<span class="mark-all-spinner" aria-hidden="true"></span>Marking...';
 
     try {
         const res = await fetch('/api/clips/mark-all-viewed', {
@@ -1334,6 +1358,7 @@ async function markAllClipsViewed() {
         updateUnreviewedCount();
         renderClips();
 
+        btn.classList.remove('busy');
         btn.textContent = `✓ Marked ${data.marked}`;
 
         setTimeout(() => {
@@ -1344,6 +1369,7 @@ async function markAllClipsViewed() {
     } catch (e) {
         console.error('Mark All Reviewed failed:', e);
 
+        btn.classList.remove('busy');
         btn.textContent = 'Error — try again';
         btn.disabled = false;
 
