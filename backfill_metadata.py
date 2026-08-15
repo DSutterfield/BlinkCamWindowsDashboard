@@ -21,10 +21,11 @@ from metadata_helper import (
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "settings.ini"
+LOCAL_CONFIG_PATH = ROOT / "config" / "settings.local.ini"
 CREDS_PATH = ROOT / "config" / "credentials.json"
 
 config = configparser.ConfigParser()
-config.read(CONFIG_PATH)
+config.read([CONFIG_PATH, LOCAL_CONFIG_PATH])
 CLIPS_DIR = Path(config["download"]["output_dir"])
 
 

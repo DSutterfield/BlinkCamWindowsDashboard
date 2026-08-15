@@ -33,6 +33,7 @@ logging.getLogger("blinkpy").setLevel(logging.WARNING)
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "settings.ini"
+LOCAL_CONFIG_PATH = ROOT / "config" / "settings.local.ini"
 CREDS_PATH = ROOT / "config" / "credentials.json"
 
 THUMBS_DIR = ROOT / "static" / "thumbs"
@@ -46,7 +47,7 @@ CLIP_THUMBS_DIR = ROOT / "static" / "clip_thumbs"
 CLIP_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
 
 config = configparser.ConfigParser()
-config.read(CONFIG_PATH)
+config.read([CONFIG_PATH, LOCAL_CONFIG_PATH])
 CLIPS_DIR = Path(config["download"]["output_dir"])
 
 app = Flask(__name__)

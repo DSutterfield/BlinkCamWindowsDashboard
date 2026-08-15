@@ -19,3 +19,5 @@ static/thumbs/*.jpg
 logs/
 # Generated recorded-clip thumbnail cache
 static/clip_thumbs/
+
+config/settings.local.ini
