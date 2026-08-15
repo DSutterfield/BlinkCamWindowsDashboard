@@ -1,0 +1,16 @@
+[Unit]
+Description=Blink DVR Controller
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=dan
+Group=dan
+WorkingDirectory=/home/dan/BlinkCamWindowsDashboard
+ExecStart=/home/dan/BlinkCamWindowsDashboard/.venv/bin/python /home/dan/BlinkCamWindowsDashboard/blink_dvr.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
