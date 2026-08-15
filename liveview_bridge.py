@@ -212,6 +212,12 @@ class LiveViewBridge:
                 )
 
             self._stream = await camera.init_livestream()
+
+            # 2026-08-14 - Dan/Sage:
+            # Keep BlinkPy's normal feed(), but replace its recv() implementation
+            # with our TCP-safe IMMI receiver.
+            self._stream.recv = self._recv_blink_stream
+
             await self._stream.start()
 
             with self._frame_condition:
@@ -284,6 +290,67 @@ class LiveViewBridge:
             self._set_error(f"{type(exc).__name__}: {exc}{details}")
             await self._stop_async(preserve_error=True)
             raise RuntimeError(self._last_error) from exc
+
+    async def _recv_blink_stream(self) -> None:
+        """
+        Relay complete Blink IMMI packets to the local stream clients.
+
+        2026-08-14 - Dan/Sage:
+        BlinkPy's BlinkLiveStream.recv() uses StreamReader.read(n) and
+        treats a short TCP read as a broken IMMI packet. TCP may legally
+        return fewer than n bytes even when more data is coming.
+
+        Use readexactly() for the fixed 9-byte IMMI header and the declared
+        payload length so normal TCP fragmentation does not terminate
+        Live View prematurely.
+        """
+        stream = self._stream
+
+        if stream is None:
+            raise RuntimeError("Blink Live View stream is unavailable.")
+
+        try:
+            while not stream.target_reader.at_eof():
+                try:
+                    header = await stream.target_reader.readexactly(9)
+                except asyncio.IncompleteReadError:
+                    break
+
+                msgtype = header[0]
+                payload_length = int.from_bytes(
+                    header[5:9],
+                    byteorder="big",
+                )
+
+                if payload_length <= 0:
+                    continue
+
+                try:
+                    data = await stream.target_reader.readexactly(
+                        payload_length
+                    )
+                except asyncio.IncompleteReadError:
+                    break
+
+                if msgtype != 0x00:
+                    continue
+
+                if not data or data[0] != 0x47:
+                    continue
+
+                for writer in stream.clients:
+                    if not writer.is_closing():
+                        writer.write(data)
+                        await writer.drain()
+
+                await asyncio.sleep(0)
+
+        finally:
+            if (
+                stream.target_writer is not None
+                and not stream.target_writer.is_closing()
+            ):
+                stream.target_writer.close()
 
     async def _read_ffmpeg_frames(self) -> None:
         """Split FFmpeg's MJPEG byte stream into individual JPEG images."""
