@@ -265,6 +265,41 @@ async def download_new_clips(blink):
         except Exception as e:
             log.warning(f"Metadata fetch failed (clips still saved): {e}")
 
+    # 2026-08-15 - Dan/Sage:
+    # Give newly downloaded clips their thumbnails promptly so the
+    # Dashboard does not have to wait for the gradual background cache.
+    # Limit attempts so a first-run backlog does not hammer Blink.
+    immediate_thumbnail_limit = 10
+    immediate_thumbnail_attempts = 0
+    immediate_thumbnails_cached = 0
+
+    for mp4 in sorted(
+        new_files,
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    ):
+        if immediate_thumbnail_attempts >= immediate_thumbnail_limit:
+            break
+
+        sidecar = read_sidecar(mp4)
+        if not sidecar:
+            continue
+
+        immediate_thumbnail_attempts += 1
+
+        try:
+            if await cache_clip_thumbnail(blink, mp4, sidecar):
+                immediate_thumbnails_cached += 1
+        except Exception as e:
+            log.warning(
+                f"Immediate thumbnail cache failed for {mp4.name}: {e}"
+            )
+
+    if immediate_thumbnails_cached:
+        log.info(
+            f"Cached {immediate_thumbnails_cached} new clip thumbnail(s)"
+        )
+
     return len(new_files)
 
 def cleanup_old_clips():
