@@ -44,6 +44,7 @@
     <Compile Include="first_login.py" />
     <Compile Include="liveview_bridge.py" />
     <Compile Include="liveview_cooldown_probe.py" />
+    <Compile Include="liveview_duration_probe.py" />
     <Compile Include="liveview_raw.py" />
     <Compile Include="metadata_helper.py" />
     <Compile Include="mini_check.py" />
