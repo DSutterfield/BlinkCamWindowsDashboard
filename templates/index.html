@@ -162,6 +162,12 @@
   }
   .preview video { width: 100%; height: 100%; object-fit: contain; background: #000; }
   .preview img.preview-img { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .preview img.preview-img.doorbell-preview {
+        width: auto;
+        height: auto;
+        max-width: 85%;
+        max-height: 85%;
+    }
   .preview .placeholder { color: #555; font-size: 1.3rem; text-align: center; }
     .preview .loading-overlay {
         position: absolute;
@@ -756,8 +762,8 @@
       const safeName = cam.name.replace(/'/g, "\\'");
       const thumbnailUrl = cam.media.thumbnail_url;
       const motionEnabled = cam.status.motion_enabled;
-      card.innerHTML = `
-        <div class="thumb-wrap" onclick="showCameraInPreview('${safeName}', '${thumbnailUrl}')">
+        card.innerHTML = `
+          <div class="thumb-wrap" onclick="showCameraInPreview('${safeName}', '${thumbnailUrl}', '${cam.raw_type}')">
           <img class="thumb" src="${bust(thumbnailUrl)}"
                onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
           <div class="no-thumb" style="display:none">No thumbnail yet — click ⟳ to capture</div>
@@ -832,8 +838,13 @@
     video.style.display = 'none';
   }
 
-    async function showCameraInPreview(name, thumbnailUrl) {
+async function showCameraInPreview(name, thumbnailUrl, cameraType) {
         const img = document.getElementById('preview-img');
+
+        img.classList.toggle(
+            'doorbell-preview',
+            cameraType === 'tulip'
+        );
         const placeholder = document.getElementById('placeholder');
         const info = document.getElementById('info-text');
         const startBtn = document.getElementById('start-liveview');
