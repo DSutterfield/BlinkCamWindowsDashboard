@@ -332,6 +332,9 @@ async def main():
                 if downloaded:
                     log.info(f"Downloaded {downloaded} new clip(s)")
                 cleanup_old_clips()
+                log.info(
+                    f"Poll cycle complete; next poll in {POLL_INTERVAL} seconds"
+                )
             except Exception as e:
                 log.exception(f"Error in poll cycle: {e}")
 
