@@ -320,6 +320,60 @@ def cleanup_old_clips():
         log.info(f"Cleaned up {count} old clips")
     return count
 
+class BlinkController:
+    """Long-lived Blink controller shared by DVR and API services."""
+
+    def __init__(self):
+        self.session = None
+        self.blink = None
+
+    async def start(self):
+        """Create the HTTP session and connect to Blink."""
+        self.session = ClientSession()
+        self.blink = await setup_blink(self.session)
+
+        log.info(
+            f"Connected. Found {len(self.blink.cameras)} cameras: "
+            f"{list(self.blink.cameras.keys())}"
+        )
+
+    async def stop(self):
+        """Shut down the controller cleanly."""
+        if self.session is not None:
+            await self.session.close()
+            self.session = None
+
+        self.blink = None
+
+    async def poll_once(self):
+        """Perform one DVR polling and cleanup cycle."""
+        downloaded = await download_new_clips(self.blink)
+
+        if downloaded:
+            log.info(f"Downloaded {downloaded} new clip(s)")
+
+        cleanup_old_clips()
+
+    async def run(self):
+        """Run the Blink controller continuously."""
+        await self.start()
+
+        try:
+            while True:
+                try:
+                    await self.poll_once()
+
+                    log.info(
+                        f"Poll cycle complete; next poll in "
+                        f"{POLL_INTERVAL} seconds"
+                    )
+                except Exception as e:
+                    log.exception(f"Error in poll cycle: {e}")
+
+                await asyncio.sleep(POLL_INTERVAL)
+        finally:
+            await self.stop()
+
 async def main():
     log.info("Blink DVR starting")
     async with ClientSession() as session:
@@ -340,6 +394,11 @@ async def main():
 
             await asyncio.sleep(POLL_INTERVAL)
 
+async def main():
+    log.info("Blink DVR starting")
+
+    controller = BlinkController()
+    await controller.run()
 
 if __name__ == "__main__":
     print("Blink DVR starting up...")
