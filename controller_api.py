@@ -106,4 +106,43 @@ def create_app(controller):
             ),
         }
 
+    @app.get("/api/v1/systems")
+    async def systems():
+        """Return Blink systems known to the Pi Controller."""
+
+        if controller.blink is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Blink controller is not connected",
+            )
+
+        result = []
+
+        for dictionary_key, system in controller.blink.sync.items():
+            system_id = str(system.network_id)
+
+            camera_count = sum(
+                1
+                for camera in controller.blink.cameras.values()
+                if str(camera.sync.network_id) == system_id
+            )
+
+            result.append(
+                {
+                    "id": system_id,
+                    "name": (system.name or dictionary_key).strip(),
+                    "armed": system.arm,
+                    "online": system.online,
+                    "camera_count": camera_count,
+                }
+            )
+
+        return {
+            "count": len(result),
+            "systems": sorted(
+                result,
+                key=lambda system: system["name"].lower(),
+            ),
+        }
+
     return app
