@@ -42,6 +42,9 @@ from fastapi import FastAPI
 class MotionRequest(BaseModel):
     enabled: bool
 
+class SystemArmRequest(BaseModel):
+    armed: bool
+
 def create_app(controller):
     """Create the Controller API around an existing BlinkController."""
 
@@ -145,6 +148,58 @@ def create_app(controller):
                 result,
                 key=lambda system: system["name"].lower(),
             ),
+        }
+
+    @app.put("/api/v1/systems/{system_id}/arm")
+    async def set_system_arm(system_id: str, request: SystemArmRequest):
+        """Arm or disarm one Blink system."""
+
+        if controller.blink is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Blink controller is not connected",
+            )
+
+        system = next(
+            (
+                system
+                for system in controller.blink.sync.values()
+                if str(system.network_id) == system_id
+            ),
+            None,
+        )
+
+        if system is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"System {system_id} was not found",
+            )
+
+        previous_state = system.arm
+
+        try:
+            response = await system.async_arm(request.armed)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Blink system arm command failed: {exc}",
+            ) from exc
+
+        if response is None:
+            raise HTTPException(
+                status_code=502,
+                detail="Blink did not return a response",
+            )
+
+        # Refresh this system's network information so the returned
+        # state comes back from Blink rather than from our request.
+        await system.get_network_info()
+
+        return {
+            "id": str(system.network_id),
+            "name": system.name.strip(),
+            "previous_armed": previous_state,
+            "armed": system.arm,
         }
 
     @app.put("/api/v1/devices/{device_id}/motion")
