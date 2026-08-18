@@ -10,7 +10,7 @@ API Version: 1
 """
 
 from fastapi import FastAPI, HTTPException
-
+from pydantic import BaseModel
 
 app = FastAPI(
     title="Blink Controller API",
@@ -39,6 +39,8 @@ API Version: 1
 
 from fastapi import FastAPI
 
+class MotionRequest(BaseModel):
+    enabled: bool
 
 def create_app(controller):
     """Create the Controller API around an existing BlinkController."""
@@ -143,6 +145,58 @@ def create_app(controller):
                 result,
                 key=lambda system: system["name"].lower(),
             ),
+        }
+
+    @app.put("/api/v1/devices/{device_id}/motion")
+    async def set_device_motion(device_id: str, request: MotionRequest):
+        """Enable or disable motion detection for one camera."""
+
+        if controller.blink is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Blink controller is not connected",
+            )
+
+        camera = next(
+            (
+                camera
+                for camera in controller.blink.cameras.values()
+                if str(camera.camera_id) == device_id
+            ),
+            None,
+        )
+
+        if camera is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Device {device_id} was not found",
+            )
+
+        previous_state = camera.motion_enabled
+
+        try:
+            response = await camera.async_arm(request.enabled)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Blink motion command failed: {exc}",
+            ) from exc
+
+        if response is None:
+            raise HTTPException(
+                status_code=502,
+                detail="Blink did not return a response",
+            )
+
+        # BlinkPy sends the command but does not update this cached field.
+        # Keep our controller state synchronized with the accepted request.
+        camera.motion_enabled = request.enabled
+
+        return {
+            "id": str(camera.camera_id),
+            "name": camera.name.strip(),
+            "previous_motion_enabled": previous_state,
+            "motion_enabled": camera.motion_enabled,
         }
 
     return app
