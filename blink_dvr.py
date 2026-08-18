@@ -4,6 +4,7 @@ them to local folders organized by camera name.
 """
 import asyncio
 import configparser
+import contextlib
 import json
 import logging
 import os
@@ -16,6 +17,8 @@ from aiohttp import ClientSession
 from blinkpy.auth import Auth, BlinkTwoFARequiredError
 from blinkpy.blinkpy import Blink
 
+import uvicorn
+from controller_api import create_app
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "settings.ini"
@@ -320,12 +323,21 @@ def cleanup_old_clips():
         log.info(f"Cleaned up {count} old clips")
     return count
 
+class EmbeddedUvicornServer(uvicorn.Server):
+    """Uvicorn server embedded inside the Blink Controller process."""
+
+    @contextlib.contextmanager
+    def capture_signals(self):
+        # systemd owns SIGTERM/SIGINT handling for the controller process.
+        yield
+
 class BlinkController:
     """Long-lived Blink controller shared by DVR and API services."""
 
     def __init__(self):
         self.session = None
         self.blink = None
+        self.api_server = None
 
     async def start(self):
         """Create the HTTP session and connect to Blink."""
@@ -354,9 +366,27 @@ class BlinkController:
 
         cleanup_old_clips()
 
+    async def run_api(self):
+        """Run the Controller API in the same process and event loop."""
+
+        app = create_app(self)
+
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+        )
+
+        self.api_server = EmbeddedUvicornServer(config)
+        await self.api_server.serve()
+
     async def run(self):
-        """Run the Blink controller continuously."""
+        """Run the Blink controller, DVR poller, and API continuously."""
+
         await self.start()
+
+        api_task = asyncio.create_task(self.run_api())
 
         try:
             while True:
@@ -371,28 +401,13 @@ class BlinkController:
                     log.exception(f"Error in poll cycle: {e}")
 
                 await asyncio.sleep(POLL_INTERVAL)
+
         finally:
+            if self.api_server is not None:
+                self.api_server.should_exit = True
+
+            await api_task
             await self.stop()
-
-async def main():
-    log.info("Blink DVR starting")
-    async with ClientSession() as session:
-        blink = await setup_blink(session)
-        log.info(f"Connected. Found {len(blink.cameras)} cameras: {list(blink.cameras.keys())}")
-
-        while True:
-            try:
-                downloaded = await download_new_clips(blink)
-                if downloaded:
-                    log.info(f"Downloaded {downloaded} new clip(s)")
-                cleanup_old_clips()
-                log.info(
-                    f"Poll cycle complete; next poll in {POLL_INTERVAL} seconds"
-                )
-            except Exception as e:
-                log.exception(f"Error in poll cycle: {e}")
-
-            await asyncio.sleep(POLL_INTERVAL)
 
 async def main():
     log.info("Blink DVR starting")
