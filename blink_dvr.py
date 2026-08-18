@@ -339,6 +339,7 @@ class BlinkController:
         self.blink = None
         self.api_server = None
         self.archive_dir = OUTPUT_DIR
+        self.clip_thumbs_dir = CLIP_THUMBS_DIR
 
     async def start(self):
         """Create the HTTP session and connect to Blink."""

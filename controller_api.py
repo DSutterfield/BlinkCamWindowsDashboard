@@ -11,6 +11,8 @@ API Version: 1
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
+from pathlib import Path
+from fastapi.responses import FileResponse
 import json
 
 app = FastAPI(
@@ -320,5 +322,66 @@ def create_app(controller):
             "count": len(page),
             "clips": page,
         }
+
+    @app.get("/api/v1/clips/{filename}/video")
+    async def clip_video(filename: str):
+        """Return one locally archived MP4 clip."""
+
+        if (
+            "/" in filename
+            or "\\" in filename
+            or Path(filename).name != filename
+            or Path(filename).suffix.lower() != ".mp4"
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid clip filename",
+            )
+
+        video_path = controller.archive_dir / filename
+
+        if not video_path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="Clip video was not found",
+            )
+
+        return FileResponse(
+            path=video_path,
+            media_type="video/mp4",
+            filename=filename,
+            content_disposition_type="inline",
+        )
+
+    @app.get("/api/v1/clips/{filename}/thumbnail")
+    async def clip_thumbnail(filename: str):
+        """Return the cached thumbnail for one locally archived clip."""
+
+        if (
+            "/" in filename
+            or "\\" in filename
+            or Path(filename).name != filename
+            or Path(filename).suffix.lower() != ".mp4"
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid clip filename",
+            )
+
+        thumbnail_name = f"{Path(filename).stem}.jpg"
+        thumbnail_path = controller.clip_thumbs_dir / thumbnail_name
+
+        if not thumbnail_path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="Clip thumbnail was not found",
+            )
+
+        return FileResponse(
+            path=thumbnail_path,
+            media_type="image/jpeg",
+            filename=thumbnail_name,
+            content_disposition_type="inline",
+        )
 
     return app
