@@ -39,16 +39,15 @@ CREDS_PATH = ROOT / "config" / "credentials.json"
 THUMBS_DIR = ROOT / "static" / "thumbs"
 THUMBS_DIR.mkdir(parents=True, exist_ok=True)
 
-# 2026-08-13 - Dan/Sage:
-# Cache recorded-clip thumbnails locally after their first retrieval
-# from Blink.  This prevents repeated cloud requests when the clip list
-# is refreshed or reopened.
-CLIP_THUMBS_DIR = ROOT / "static" / "clip_thumbs"
-CLIP_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
-
 config = configparser.ConfigParser()
 config.read([CONFIG_PATH, LOCAL_CONFIG_PATH])
 CLIPS_DIR = Path(config["download"]["output_dir"])
+
+# 2026-08-19 - Dan/Sage:
+# Store recorded-clip thumbnails with the Blink archive on the
+# external drive rather than inside the application source tree.
+CLIP_THUMBS_DIR = CLIPS_DIR.parent / "clip_thumbs"
+CLIP_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 blink_lock = Lock()

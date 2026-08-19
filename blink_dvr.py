@@ -33,7 +33,7 @@ OUTPUT_DIR = Path(config["download"]["output_dir"])
 # 2026-08-13 - Dan/Sage:
 # Recorded-clip thumbnails are cached locally by the DVR poller so
 # Dashboard playback never has to wait for a Blink thumbnail request.
-CLIP_THUMBS_DIR = ROOT / "static" / "clip_thumbs"
+CLIP_THUMBS_DIR = OUTPUT_DIR.parent / "clip_thumbs"
 CLIP_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
 
 POLL_INTERVAL = int(config["download"]["poll_interval_seconds"])
