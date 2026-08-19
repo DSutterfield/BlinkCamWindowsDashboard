@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS clips (
     video_path              TEXT NOT NULL UNIQUE,
     sidecar_path            TEXT UNIQUE,
     thumbnail_path          TEXT,
+    thumbnail_cloud_url     TEXT,
 
     file_size_bytes         INTEGER,
 
