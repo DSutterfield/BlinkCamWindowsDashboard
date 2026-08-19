@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS clips (
 
     blink_media_id          TEXT UNIQUE,
 
+    metadata_status         TEXT NOT NULL DEFAULT 'matched'
+                            CHECK (metadata_status IN ('matched', 'local_only')),
+
     device_id               INTEGER,
     system_id               INTEGER,
 
@@ -84,6 +87,7 @@ CREATE TABLE IF NOT EXISTS clips (
     filename                TEXT NOT NULL,
     video_path              TEXT NOT NULL UNIQUE,
     sidecar_path            TEXT UNIQUE,
+    metadata_source_path    TEXT,
     thumbnail_path          TEXT,
     thumbnail_cloud_url     TEXT,
 
