@@ -21,6 +21,7 @@
   <ItemGroup>
     <Content Include="config\settings.ini" />
     <Content Include="Create-BlinkShortcuts.ps1" />
+    <Content Include="deploy\blink-dvr.service" />
     <Content Include="Get-BlinkStatus.ps1" />
     <Content Include="img\img.jpg" />
     <Content Include="requirements.txt" />
@@ -57,6 +58,7 @@
     <Folder Include="BlinkCamWindowsDashboard" />
     <Folder Include="config" />
     <Folder Include="img" />
+    <Folder Include="deploy\" />
     <Folder Include="static\" />
     <Folder Include="static\thumbs" />
     <Folder Include="templates" />
