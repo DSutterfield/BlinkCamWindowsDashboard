@@ -88,9 +88,12 @@ def event_timestamp(event: dict) -> Optional[datetime]:
 
 def match_event_to_file(event: dict, mp4_files: list) -> Optional[Path]:
     """
-    Given a Blink event and a list of MP4 file paths, return the MP4 whose
-    filename timestamp is within 60 seconds of the event's created_at AND
-    whose filename contains the device name.
+    Match a Blink media event to its exact downloaded MP4.
+
+    The camera slug and filename timestamp must exactly match the
+    event's device_name and created_at.  Do not use a time tolerance:
+    closely spaced motion events can otherwise be associated with
+    the wrong recording.
     """
     event_dt = event_timestamp(event)
     if event_dt is None:
@@ -100,28 +103,23 @@ def match_event_to_file(event: dict, mp4_files: list) -> Optional[Path]:
     if not device_name:
         return None
 
-    # Normalize camera names to the filename form used by downloaded clips.
-    # Convert spaces, slashes, punctuation, and repeated separators to one dash.
     device_slug = re.sub(
         r"[^a-z0-9]+",
         "-",
         device_name.lower(),
     ).strip("-")
 
-    best_match = None
-    best_delta = None
-    for mp4 in mp4_files:
-        if device_slug not in mp4.name.lower():
-            continue
-        file_dt = filename_to_timestamp(mp4.name)
-        if file_dt is None:
-            continue
-        delta = abs((file_dt - event_dt).total_seconds())
-        if delta < 60 and (best_delta is None or delta < best_delta):
-            best_match = mp4
-            best_delta = delta
-    return best_match
+    expected_stem = (
+        f"{device_slug}-"
+        f"{event_dt.strftime('%Y-%m-%dt%H-%M-%S')}"
+        "-00-00"
+    )
 
+    for mp4 in mp4_files:
+        if mp4.stem.lower() == expected_stem:
+            return mp4
+
+    return None
 
 def write_sidecar(mp4_path: Path, event: dict) -> None:
     """Write the sidecar JSON file for a given MP4."""

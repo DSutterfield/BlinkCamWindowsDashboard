@@ -218,6 +218,33 @@ async def download_new_clips(blink):
                     f"Thumbnail cache failed for {mp4.name}: {e}"
                 )
 
+    # 2026-08-19 - Dan/Sage:
+    # Retry metadata association for archived MP4s that do not yet have
+    # a sidecar. A transient Blink metadata failure must not leave a clip
+    # permanently without metadata. Exact matching prevents neighboring
+    # rapid-motion clips from being confused with one another.
+    missing_sidecars = [
+        mp4
+        for mp4 in OUTPUT_DIR.glob("*.mp4")
+        if not metadata_path_for(mp4).exists()
+    ]
+
+    recovered_sidecars = 0
+
+    if missing_sidecars:
+        for event in events:
+            matched = match_event_to_file(event, missing_sidecars)
+
+            if matched and not metadata_path_for(matched).exists():
+                write_sidecar(matched, event)
+                recovered_sidecars += 1
+
+        if recovered_sidecars:
+            log.info(
+                f"Recovered metadata sidecars for "
+                f"{recovered_sidecars} archived clip(s)"
+            )
+
     if status_updates:
         log.info(
             f"Refreshed metadata in {status_updates} sidecar(s)"
