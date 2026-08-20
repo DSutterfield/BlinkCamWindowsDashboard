@@ -19,6 +19,7 @@ from blinkpy.blinkpy import Blink
 
 import uvicorn
 from controller_api import create_app
+from catalog_store import sync_clip
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "settings.ini"
@@ -29,6 +30,8 @@ config = configparser.ConfigParser()
 config.read([CONFIG_PATH, LOCAL_CONFIG_PATH])
 
 OUTPUT_DIR = Path(config["download"]["output_dir"])
+ARCHIVE_ROOT = OUTPUT_DIR.parent
+CATALOG_DB = ARCHIVE_ROOT / "blink_catalog.db"
 
 # 2026-08-13 - Dan/Sage:
 # Recorded-clip thumbnails are cached locally by the DVR poller so
@@ -68,6 +71,38 @@ def save_creds(data):
 
 def sanitize(name):
     return "".join(c if c.isalnum() or c in "-_ " else "_" for c in name).strip()
+
+def sync_catalog_clip(mp4):
+    """
+    Refresh one clip in the SQLite catalog from its trusted sidecar.
+    """
+    from metadata_helper import read_sidecar
+
+    metadata = read_sidecar(mp4)
+    if not metadata:
+        return False
+
+    try:
+        sync_clip(
+            db_path=CATALOG_DB,
+            archive_root=ARCHIVE_ROOT,
+            thumbs_dir=CLIP_THUMBS_DIR,
+            mp4_path=mp4,
+            metadata=metadata,
+        )
+        return True
+
+    except ValueError as e:
+        log.warning(
+            f"Catalog metadata not trusted for {mp4.name}: {e}"
+        )
+        return False
+
+    except Exception as e:
+        log.warning(
+            f"Catalog sync failed for {mp4.name}: {e}"
+        )
+        return False
 
 
 async def setup_blink(session):
@@ -156,6 +191,7 @@ async def download_new_clips(blink):
     }
 
     status_updates = 0
+    catalog_refresh = set()
 
     # 2026-08-13 - Dan/Sage:
     # Fill the recorded-clip thumbnail cache gradually so background
@@ -206,6 +242,7 @@ async def download_new_clips(blink):
                     json.dumps(sidecar, indent=2)
                 )
                 status_updates += 1
+                catalog_refresh.add(mp4)
 
         # Cache from the sidecar itself.  The Blink event does not have
         # to still be present in the current metadata response.
@@ -213,6 +250,7 @@ async def download_new_clips(blink):
             try:
                 if await cache_clip_thumbnail(blink, mp4, sidecar):
                     thumbnails_cached += 1
+                    catalog_refresh.add(mp4)
             except Exception as e:
                 log.warning(
                     f"Thumbnail cache failed for {mp4.name}: {e}"
@@ -238,6 +276,7 @@ async def download_new_clips(blink):
             if matched and not metadata_path_for(matched).exists():
                 write_sidecar(matched, event)
                 recovered_sidecars += 1
+                catalog_refresh.add(matched)
 
         if recovered_sidecars:
             log.info(
@@ -290,6 +329,7 @@ async def download_new_clips(blink):
                 if matched and not metadata_path_for(matched).exists():
                     write_sidecar(matched, event)
                     sidecar_count += 1
+                    catalog_refresh.add(matched)
             if sidecar_count:
                 log.info(f"Wrote {sidecar_count} metadata sidecar(s)")
         except Exception as e:
@@ -329,6 +369,23 @@ async def download_new_clips(blink):
         log.info(
             f"Cached {immediate_thumbnails_cached} new clip thumbnail(s)"
         )
+
+    # 2026-08-19 - Dan/Sage:
+    # Refresh the SQLite catalog once per changed clip after all sidecar
+    # and thumbnail work for this poll cycle is complete. Catalog failures
+    # must never prevent Blink clips from being downloaded and archived.
+    if catalog_refresh:
+        catalog_synced = 0
+
+        for mp4 in sorted(catalog_refresh):
+            if sync_catalog_clip(mp4):
+                catalog_synced += 1
+
+        if catalog_synced:
+            log.info(
+                f"Refreshed SQLite catalog for "
+                f"{catalog_synced} clip(s)"
+            )
 
     return len(new_files)
 
