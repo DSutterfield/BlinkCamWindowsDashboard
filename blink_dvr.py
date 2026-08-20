@@ -425,6 +425,9 @@ class BlinkController:
         self.archive_dir = OUTPUT_DIR
         self.clip_thumbs_dir = CLIP_THUMBS_DIR
         self.catalog_db_path = CATALOG_DB
+        self.blink_cloud_reachable = None
+        self.last_poll_success_at = None
+        self.last_poll_error = None
 
     async def start(self):
         """Create the HTTP session and connect to Blink."""
@@ -480,11 +483,20 @@ class BlinkController:
                 try:
                     await self.poll_once()
 
+                    self.blink_cloud_reachable = True
+                    self.last_poll_success_at = (
+                        datetime.now(timezone.utc).isoformat()
+                    )
+                    self.last_poll_error = None
+
                     log.info(
                         f"Poll cycle complete; next poll in "
                         f"{POLL_INTERVAL} seconds"
                     )
                 except Exception as e:
+                    self.blink_cloud_reachable = False
+                    self.last_poll_error = str(e)
+
                     log.exception(f"Error in poll cycle: {e}")
 
                 await asyncio.sleep(POLL_INTERVAL)

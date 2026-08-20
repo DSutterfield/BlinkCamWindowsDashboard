@@ -58,7 +58,7 @@ def create_app(controller):
 
     @app.get("/api/v1/health")
     async def health():
-        """Return Pi Controller and Blink connection health."""
+        """Return Pi Controller, storage, and Blink connection health."""
 
         connected = controller.blink is not None
 
@@ -67,13 +67,30 @@ def create_app(controller):
         else:
             camera_count = 0
 
+        archive_available = controller.archive_dir.is_dir()
+        catalog_available = controller.catalog_db_path.is_file()
+
         return {
-            "status": "ok",
+            "status": (
+                "ok"
+                if archive_available and catalog_available
+                else "degraded"
+            ),
             "controller": "blink-controller",
             "api_version": "1",
             "blink_connected": connected,
+            "blink_cloud_reachable": (
+                controller.blink_cloud_reachable
+            ),
+            "last_poll_success_at": (
+                controller.last_poll_success_at
+            ),
+            "last_poll_error": controller.last_poll_error,
+            "archive_available": archive_available,
+            "catalog_available": catalog_available,
             "camera_count": camera_count,
         }
+
     @app.get("/api/v1/devices")
     async def devices():
         """Return devices known to the Pi Controller."""
