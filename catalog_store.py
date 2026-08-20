@@ -512,3 +512,59 @@ def list_clips(db_path, limit=100, offset=0):
 
     finally:
         conn.close()
+
+
+def get_clip_by_media_id(db_path, media_id):
+    """Return one locally archived clip identified by its Blink media ID."""
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                blink_media_id,
+                filename,
+                sidecar_path,
+                watched
+            FROM clips
+            WHERE blink_media_id = ?
+              AND local_present = 1
+            ORDER BY captured_at DESC
+            LIMIT 1
+            """,
+            (str(media_id),),
+        ).fetchone()
+
+        return dict(row) if row is not None else None
+
+    finally:
+        conn.close()
+
+
+def set_clip_watched(db_path, catalog_id, watched):
+    """Update the local watched/reviewed state for one catalog clip."""
+
+    conn = sqlite3.connect(db_path)
+
+    try:
+        with conn:
+            cursor = conn.execute(
+                """
+                UPDATE clips
+                SET watched = ?,
+                    catalog_updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    1 if watched else 0,
+                    catalog_id,
+                ),
+            )
+
+        return cursor.rowcount == 1
+
+    finally:
+        conn.close()

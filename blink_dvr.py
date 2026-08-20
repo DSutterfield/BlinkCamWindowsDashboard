@@ -425,6 +425,7 @@ class BlinkController:
         self.archive_dir = OUTPUT_DIR
         self.clip_thumbs_dir = CLIP_THUMBS_DIR
         self.catalog_db_path = CATALOG_DB
+        self.archive_root = ARCHIVE_ROOT
         self.blink_cloud_reachable = None
         self.last_poll_success_at = None
         self.last_poll_error = None
