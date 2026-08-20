@@ -422,3 +422,93 @@ def sync_clip(
 
     finally:
         conn.close()
+
+
+def list_clips(db_path, limit=100, offset=0):
+    """Return locally available recorded clips from the SQLite catalog."""
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    try:
+        total = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM clips
+            WHERE local_present = 1
+            """
+        ).fetchone()[0]
+
+        rows = conn.execute(
+            """
+            SELECT
+                blink_media_id,
+                filename,
+                device_name_snapshot,
+                system_name_snapshot,
+                captured_at,
+                blink_updated_at,
+                watched,
+                source,
+                media_type,
+                trigger_type,
+                cv_detection_json,
+                duration_ms,
+                time_zone,
+                thumbnail_path
+            FROM clips
+            WHERE local_present = 1
+            ORDER BY captured_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+
+        clips = []
+
+        for row in rows:
+            detections = []
+
+            if row["cv_detection_json"]:
+                try:
+                    detections = json.loads(
+                        row["cv_detection_json"]
+                    )
+                except json.JSONDecodeError:
+                    detections = []
+
+            clips.append(
+                {
+                    "id": row["blink_media_id"],
+                    "filename": row["filename"],
+                    "device_name": row["device_name_snapshot"],
+                    "system_name": row["system_name_snapshot"],
+                    "created_at": row["captured_at"],
+                    "updated_at": row["blink_updated_at"],
+                    "watched": (
+                        None
+                        if row["watched"] is None
+                        else bool(row["watched"])
+                    ),
+                    "source": row["source"],
+                    "type": row["media_type"],
+                    "trigger_type": row["trigger_type"],
+                    "cv_detection": detections,
+                    "duration_ms": row["duration_ms"],
+                    "time_zone": row["time_zone"],
+                    "thumbnail_available": (
+                        row["thumbnail_path"] is not None
+                    ),
+                }
+            )
+
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "count": len(clips),
+            "clips": clips,
+        }
+
+    finally:
+        conn.close()

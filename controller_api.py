@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from pathlib import Path
 from fastapi.responses import FileResponse
-import json
+from catalog_store import list_clips
 
 app = FastAPI(
     title="Blink Controller API",
@@ -262,66 +262,25 @@ def create_app(controller):
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ):
-        """Return locally archived recorded clips."""
+        """Return locally archived recorded clips from SQLite."""
 
-        archive_dir = controller.archive_dir
-
-        if not archive_dir.exists():
+        if not controller.catalog_db_path.is_file():
             raise HTTPException(
                 status_code=503,
-                detail="Local clip archive is unavailable",
+                detail="Local clip catalog is unavailable",
             )
 
-        result = []
-
-        for metadata_path in archive_dir.glob("*.json"):
-            video_path = metadata_path.with_suffix(".mp4")
-
-            # Recorded Clips represents playable local archive items.
-            if not video_path.exists():
-                continue
-
-            try:
-                with metadata_path.open(
-                    "r",
-                    encoding="utf-8",
-                ) as metadata_file:
-                    metadata = json.load(metadata_file)
-            except (OSError, json.JSONDecodeError):
-                continue
-
-            result.append(
-                {
-                    "id": metadata.get("id"),
-                    "filename": video_path.name,
-                    "device_name": metadata.get("device_name"),
-                    "device_type": metadata.get("device_type"),
-                    "created_at": metadata.get("created_at"),
-                    "updated_at": metadata.get("updated_at"),
-                    "watched": metadata.get("watched"),
-                    "source": metadata.get("source"),
-                    "type": metadata.get("type"),
-                    "cv_detection": metadata.get("cv_detection", []),
-                    "duration_ms": metadata.get("duration_ms"),
-                    "time_zone": metadata.get("time_zone"),
-                }
+        try:
+            return list_clips(
+                db_path=controller.catalog_db_path,
+                limit=limit,
+                offset=offset,
             )
-
-        result.sort(
-            key=lambda clip: clip.get("created_at") or "",
-            reverse=True,
-        )
-
-        total = len(result)
-        page = result[offset : offset + limit]
-
-        return {
-            "total": total,
-            "offset": offset,
-            "limit": limit,
-            "count": len(page),
-            "clips": page,
-        }
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Clip catalog query failed: {exc}",
+            ) from exc
 
     @app.get("/api/v1/clips/{filename}/video")
     async def clip_video(filename: str):
