@@ -439,6 +439,15 @@ def list_clips(db_path, limit=100, offset=0):
             """
         ).fetchone()[0]
 
+        unreviewed_total = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM clips
+            WHERE local_present = 1
+              AND COALESCE(watched, 0) = 0
+            """
+        ).fetchone()[0]
+
         rows = conn.execute(
             """
             SELECT
@@ -504,6 +513,7 @@ def list_clips(db_path, limit=100, offset=0):
 
         return {
             "total": total,
+            "unreviewed_total": unreviewed_total,
             "offset": offset,
             "limit": limit,
             "count": len(clips),
