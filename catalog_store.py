@@ -451,6 +451,7 @@ def list_clips(db_path, limit=100, offset=0):
         rows = conn.execute(
             """
             SELECT
+                id,
                 blink_media_id,
                 filename,
                 device_name_snapshot,
@@ -488,17 +489,14 @@ def list_clips(db_path, limit=100, offset=0):
 
             clips.append(
                 {
+                    "catalog_id": row["id"],
                     "id": row["blink_media_id"],
                     "filename": row["filename"],
                     "device_name": row["device_name_snapshot"],
                     "system_name": row["system_name_snapshot"],
                     "created_at": row["captured_at"],
                     "updated_at": row["blink_updated_at"],
-                    "watched": (
-                        None
-                        if row["watched"] is None
-                        else bool(row["watched"])
-                    ),
+                    "watched": bool(row["watched"]),
                     "source": row["source"],
                     "type": row["media_type"],
                     "trigger_type": row["trigger_type"],
@@ -575,6 +573,34 @@ def set_clip_watched(db_path, catalog_id, watched):
             )
 
         return cursor.rowcount == 1
+
+    finally:
+        conn.close()
+
+def get_clip_by_catalog_id(db_path, catalog_id):
+    """Return one locally archived clip identified by its catalog row ID."""
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                blink_media_id,
+                filename,
+                sidecar_path,
+                watched
+            FROM clips
+            WHERE id = ?
+              AND local_present = 1
+            LIMIT 1
+            """,
+            (catalog_id,),
+        ).fetchone()
+
+        return dict(row) if row is not None else None
 
     finally:
         conn.close()
