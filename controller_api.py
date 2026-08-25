@@ -305,37 +305,35 @@ def create_app(controller):
                 detail=f"Clip catalog query failed: {exc}",
             ) from exc
 
-@app.put("/api/v1/clips/catalog/{catalog_id}/review")
-async def review_clip_by_catalog_id(catalog_id: int):
-    """Mark one locally archived clip as reviewed by catalog row ID."""
-
-    clip = get_clip_by_catalog_id(
-        db_path=controller.catalog_db_path,
-        catalog_id=catalog_id,
-    )
-
-    if clip is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Clip was not found in the local catalog",
-        )
-
-    blink_media_id = clip["blink_media_id"]
-    cloud_updated = False
-
-    # If this catalog row has a Blink cloud media ID, mark the
-    # corresponding Blink clip as viewed first.
-    #
-    # Do this even when the local catalog already says watched=True.
-    # That allows us to repair clips that were marked locally during
-    # the earlier Review All bug without being marked in Blink.
-    if blink_media_id:
+    @app.put("/api/v1/clips/{media_id}/review")
+    async def review_clip(media_id: str):
+        """Mark one locally archived Blink clip as reviewed."""
 
         if controller.blink is None:
             raise HTTPException(
                 status_code=503,
                 detail="Blink controller is not connected",
             )
+
+        clip = get_clip_by_media_id(
+            db_path=controller.catalog_db_path,
+            media_id=media_id,
+        )
+
+        if clip is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Clip was not found in the local catalog",
+            )
+
+        # Already reviewed is a successful no-op.
+        if clip["watched"]:
+            return {
+                "id": media_id,
+                "filename": clip["filename"],
+                "watched": True,
+                "already_reviewed": True,
+            }
 
         url = (
             f"{controller.blink.urls.base_url}"
@@ -346,16 +344,14 @@ async def review_clip_by_catalog_id(catalog_id: int):
         headers = dict(controller.blink.auth.header)
         headers["Content-Type"] = "application/json"
 
-        media_id_text = str(blink_media_id)
-
-        blink_id = (
-            int(media_id_text)
-            if media_id_text.isdigit()
-            else media_id_text
+        blink_media_id = (
+            int(media_id)
+            if media_id.isdigit()
+            else media_id
         )
 
         body = {
-            "media_list": [blink_id]
+            "media_list": [blink_media_id]
         }
 
         try:
@@ -366,65 +362,162 @@ async def review_clip_by_catalog_id(catalog_id: int):
                 reqtype="post",
                 json_resp=False,
             )
-
-            cloud_updated = True
-
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
                 detail=f"Blink review command failed: {exc}",
             ) from exc
 
-    # Update the local catalog after Blink accepts the review.
-    if not clip["watched"]:
-
         if not set_clip_watched(
             db_path=controller.catalog_db_path,
-            catalog_id=catalog_id,
+            catalog_id=clip["id"],
             watched=True,
         ):
             raise HTTPException(
                 status_code=500,
                 detail="Blink accepted the review command, "
-                       "but the local catalog was not updated",
+                "but the local catalog was not updated",
             )
 
-    # Keep the metadata sidecar synchronized too.
-    sidecar_updated = False
-    sidecar_name = clip.get("sidecar_path")
+        sidecar_updated = False
+        sidecar_name = clip.get("sidecar_path")
 
-    if sidecar_name:
+        if sidecar_name:
+            sidecar_path = controller.archive_root / sidecar_name
 
-        sidecar_path = controller.archive_root / sidecar_name
+            if sidecar_path.is_file():
+                try:
+                    metadata = json.loads(
+                        sidecar_path.read_text(encoding="utf-8")
+                    )
+                    metadata["watched"] = True
 
-        if sidecar_path.is_file():
+                    sidecar_path.write_text(
+                        json.dumps(metadata, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+
+                    sidecar_updated = True
+
+                except (OSError, json.JSONDecodeError):
+                    sidecar_updated = False
+
+        return {
+            "id": media_id,
+            "filename": clip["filename"],
+            "watched": True,
+            "already_reviewed": False,
+            "sidecar_updated": sidecar_updated,
+        }
+
+    @app.put("/api/v1/clips/catalog/{catalog_id}/review")
+    async def review_clip_by_catalog_id(catalog_id: int):
+        """Mark one locally archived clip as reviewed by catalog row ID."""
+
+        clip = get_clip_by_catalog_id(
+            db_path=controller.catalog_db_path,
+            catalog_id=catalog_id,
+        )
+
+        if clip is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Clip was not found in the local catalog",
+            )
+
+        blink_media_id = clip["blink_media_id"]
+
+        if blink_media_id:
+
+            if controller.blink is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Blink controller is not connected",
+                )
+
+            url = (
+                f"{controller.blink.urls.base_url}"
+                f"/api/v4/accounts/{controller.blink.account_id}"
+                f"/media/mark_as_viewed"
+            )
+
+            headers = dict(controller.blink.auth.header)
+            headers["Content-Type"] = "application/json"
+
+            media_id_text = str(blink_media_id)
+
+            blink_id = (
+                int(media_id_text)
+                if media_id_text.isdigit()
+                else media_id_text
+            )
+
+            body = {
+                "media_list": [blink_id]
+            }
 
             try:
-                metadata = json.loads(
-                    sidecar_path.read_text(encoding="utf-8")
+                await controller.blink.auth.query(
+                    url=url,
+                    data=json.dumps(body),
+                    headers=headers,
+                    reqtype="post",
+                    json_resp=False,
                 )
 
-                metadata["watched"] = True
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Blink review command failed: {exc}",
+                ) from exc
 
-                sidecar_path.write_text(
-                    json.dumps(metadata, indent=2) + "\n",
-                    encoding="utf-8",
+        was_already_reviewed = bool(clip["watched"])
+
+        if not was_already_reviewed:
+
+            if not set_clip_watched(
+                db_path=controller.catalog_db_path,
+                catalog_id=catalog_id,
+                watched=True,
+            ):
+                raise HTTPException(
+                    status_code=500,
+                    detail="Blink accepted the review command, "
+                    "but the local catalog was not updated",
                 )
 
-                sidecar_updated = True
+        sidecar_updated = False
+        sidecar_name = clip.get("sidecar_path")
 
-            except (OSError, json.JSONDecodeError):
-                sidecar_updated = False
+        if sidecar_name:
+            sidecar_path = controller.archive_root / sidecar_name
 
-    return {
-        "catalog_id": catalog_id,
-        "id": blink_media_id,
-        "filename": clip["filename"],
-        "watched": True,
-        "already_reviewed": bool(clip["watched"]),
-        "cloud_updated": cloud_updated,
-        "sidecar_updated": sidecar_updated,
-    }
+            if sidecar_path.is_file():
+                try:
+                    metadata = json.loads(
+                        sidecar_path.read_text(encoding="utf-8")
+                    )
+
+                    metadata["watched"] = True
+
+                    sidecar_path.write_text(
+                        json.dumps(metadata, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+
+                    sidecar_updated = True
+
+                except (OSError, json.JSONDecodeError):
+                    sidecar_updated = False
+
+        return {
+            "catalog_id": catalog_id,
+            "id": blink_media_id,
+            "filename": clip["filename"],
+            "watched": True,
+            "already_reviewed": was_already_reviewed,
+            "sidecar_updated": sidecar_updated,
+        }
 
     @app.get("/api/v1/clips/{filename}/video")
     async def clip_video(filename: str):
