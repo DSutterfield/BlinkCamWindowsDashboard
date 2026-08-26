@@ -605,3 +605,23 @@ def get_clip_by_catalog_id(db_path, catalog_id):
 
     finally:
         conn.close()
+
+def delete_clip_by_catalog_id(db_path, catalog_id):
+    """Delete one clip row from the local SQLite catalog."""
+
+    conn = sqlite3.connect(db_path)
+
+    try:
+        with conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM clips
+                WHERE id = ?
+                """,
+                (catalog_id,),
+            )
+
+        return cursor.rowcount == 1
+
+    finally:
+        conn.close()
