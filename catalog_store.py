@@ -591,6 +591,7 @@ def get_clip_by_catalog_id(db_path, catalog_id):
                 blink_media_id,
                 filename,
                 sidecar_path,
+                thumbnail_path,
                 watched
             FROM clips
             WHERE id = ?
