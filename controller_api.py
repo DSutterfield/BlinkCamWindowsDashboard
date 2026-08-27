@@ -595,6 +595,62 @@ def create_app(controller):
             "sidecar_updated": sidecar_updated,
         }
 
+    @app.delete("/api/v1/clips/catalog/{catalog_id}")
+    async def delete_recorded_clip(catalog_id: int):
+        """Delete one recorded clip from Blink and the local archive."""
+
+        if controller.blink is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Blink controller is not connected",
+            )
+
+        try:
+            return await coordinate_clip_delete(
+                controller,
+                catalog_id,
+            )
+
+        except LookupError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=str(exc),
+            ) from exc
+
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=str(exc),
+            ) from exc
+
+        except RuntimeError as exc:
+
+            message = str(exc)
+
+            if (
+                message.startswith(
+                    "Blink rejected deletion"
+                )
+                or message.startswith(
+                    "Blink deletion could not be confirmed"
+                )
+            ):
+                raise HTTPException(
+                    status_code=502,
+                    detail=message,
+                ) from exc
+
+            raise HTTPException(
+                status_code=500,
+                detail=message,
+            ) from exc
+
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Clip deletion failed: {exc}",
+            ) from exc
+
     @app.put("/api/v1/clips/catalog/{catalog_id}/review")
     async def review_clip_by_catalog_id(catalog_id: int):
         """Mark one locally archived clip as reviewed by catalog row ID."""
