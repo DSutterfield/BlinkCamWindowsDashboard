@@ -426,6 +426,7 @@ class BlinkController:
         self.clip_thumbs_dir = CLIP_THUMBS_DIR
         self.catalog_db_path = CATALOG_DB
         self.archive_root = ARCHIVE_ROOT
+        self.archive_lock = asyncio.Lock()
         self.blink_cloud_reachable = None
         self.last_poll_success_at = None
         self.last_poll_error = None
@@ -450,12 +451,19 @@ class BlinkController:
 
     async def poll_once(self):
         """Perform one DVR polling and cleanup cycle."""
-        downloaded = await download_new_clips(self.blink)
 
-        if downloaded:
-            log.info(f"Downloaded {downloaded} new clip(s)")
+        async with self.archive_lock:
 
-        cleanup_old_clips()
+            downloaded = await download_new_clips(
+                self.blink
+            )
+
+            if downloaded:
+                log.info(
+                    f"Downloaded {downloaded} new clip(s)"
+                )
+
+            cleanup_old_clips()
 
     async def run_api(self):
         """Run the Controller API in the same process and event loop."""

@@ -15,10 +15,17 @@ from pydantic import BaseModel
 from pathlib import Path
 from fastapi.responses import FileResponse
 from catalog_store import (
+    delete_clip_by_catalog_id,
     get_clip_by_catalog_id,
     get_clip_by_media_id,
     list_clips,
     set_clip_watched,
+)
+from clip_delete import (
+    finalize_staged_clip,
+    restore_staged_clip,
+    set_stage_state,
+    stage_clip_for_delete,
 )
 
 app = FastAPI(
