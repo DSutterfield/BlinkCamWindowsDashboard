@@ -131,13 +131,6 @@ def stage_clip_for_delete(archive_root, clip):
                 }
             )
 
-        return {
-            "catalog_id": clip["id"],
-            "blink_media_id": clip.get("blink_media_id"),
-            "quarantine_dir": str(quarantine_dir),
-            "files": staged_files,
-        }
-
         stage = {
             "catalog_id": clip["id"],
             "blink_media_id": clip.get("blink_media_id"),
