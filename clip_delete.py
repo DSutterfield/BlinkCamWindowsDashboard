@@ -158,3 +158,51 @@ def restore_staged_clip(stage):
         shutil.rmtree(quarantine_dir)
 
     return True
+
+def finalize_staged_clip(stage):
+    """
+    Permanently remove files from a completed delete quarantine.
+
+    Unexpected files are never removed. If anything remains in the
+    quarantine directory, finalization fails so it can be investigated
+    or retried.
+    """
+
+    quarantine_dir = Path(stage["quarantine_dir"]).resolve()
+    staged_files = stage.get("files", [])
+
+    # Safety: every staged file must belong to this quarantine directory.
+    quarantine_paths = []
+
+    for staged in staged_files:
+
+        quarantine_path = Path(
+            staged["quarantine"]
+        ).resolve()
+
+        if quarantine_dir not in quarantine_path.parents:
+            raise ValueError(
+                f"Quarantine path escapes delete directory: "
+                f"{quarantine_path}"
+            )
+
+        quarantine_paths.append(quarantine_path)
+
+    # Remove only the files that this delete operation staged.
+    for quarantine_path in quarantine_paths:
+
+        if quarantine_path.exists():
+
+            if not quarantine_path.is_file():
+                raise OSError(
+                    f"Unexpected non-file in quarantine: "
+                    f"{quarantine_path}"
+                )
+
+            quarantine_path.unlink()
+
+    # rmdir deliberately fails if anything unexpected remains.
+    if quarantine_dir.exists():
+        quarantine_dir.rmdir()
+
+    return True
