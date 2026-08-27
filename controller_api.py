@@ -110,6 +110,135 @@ async def delete_blink_cloud_media(controller, media_id):
 
         return response.status, response_text
 
+async def coordinate_clip_delete(controller, catalog_id):
+    """
+    Coordinate deletion of one Blink clip.
+
+    Local files are quarantined first. They are restored unless Blink
+    deletion is positively confirmed with a successful HTTP response.
+    """
+
+    if controller.blink is None:
+        raise RuntimeError(
+            "Blink controller is not connected"
+        )
+
+    async with controller.archive_lock:
+
+        clip = get_clip_by_catalog_id(
+            db_path=controller.catalog_db_path,
+            catalog_id=catalog_id,
+        )
+
+        if clip is None:
+            raise LookupError(
+                "Clip was not found in the local catalog"
+            )
+
+        blink_media_id = clip.get(
+            "blink_media_id"
+        )
+
+        if not blink_media_id:
+            raise ValueError(
+                "Clip has no Blink media ID"
+            )
+
+        stage = stage_clip_for_delete(
+            controller.archive_root,
+            clip,
+        )
+
+        try:
+            set_stage_state(
+                stage,
+                "cloud_delete_pending",
+            )
+
+        except Exception:
+
+            restore_staged_clip(stage)
+            raise
+
+        try:
+            status, response_text = (
+                await delete_blink_cloud_media(
+                    controller,
+                    blink_media_id,
+                )
+            )
+
+        except Exception as exc:
+
+            try:
+                restore_staged_clip(stage)
+
+            except Exception as restore_exc:
+                raise RuntimeError(
+                    "Blink deletion could not be confirmed "
+                    "and local restore also failed"
+                ) from restore_exc
+
+            raise RuntimeError(
+                "Blink deletion could not be confirmed; "
+                "local files were restored"
+            ) from exc
+
+        if not 200 <= status < 300:
+
+            try:
+                restore_staged_clip(stage)
+
+            except Exception as restore_exc:
+                raise RuntimeError(
+                    f"Blink rejected deletion with HTTP "
+                    f"{status}, and local restore failed"
+                ) from restore_exc
+
+            response_summary = (
+                response_text[:500]
+                if response_text
+                else ""
+            )
+
+            raise RuntimeError(
+                f"Blink rejected deletion with HTTP "
+                f"{status}: {response_summary}"
+            )
+
+        # From this point forward the Blink deletion is irreversible.
+        # Local failures must be recovered/retried, not rolled back.
+        set_stage_state(
+            stage,
+            "cloud_deleted",
+        )
+
+        if not delete_clip_by_catalog_id(
+            db_path=controller.catalog_db_path,
+            catalog_id=catalog_id,
+        ):
+            raise RuntimeError(
+                "Blink deleted the clip, but the local "
+                "catalog row could not be deleted"
+            )
+
+        set_stage_state(
+            stage,
+            "catalog_deleted",
+        )
+
+        finalize_staged_clip(stage)
+
+        return {
+            "deleted": True,
+            "catalog_id": catalog_id,
+            "blink_media_id": str(
+                blink_media_id
+            ),
+            "filename": clip["filename"],
+            "blink_status": status,
+        }
+
 def create_app(controller):
     """Create the Controller API around an existing BlinkController."""
 

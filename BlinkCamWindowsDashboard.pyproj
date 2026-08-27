@@ -41,6 +41,9 @@
     <Compile Include="blink_dvr.py" />
     <Compile Include="capability_matrix.py" />
     <Compile Include="capability_probe.py" />
+    <Compile Include="clip_delete.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="clip_review_probe.py" />
     <Compile Include="first_login.py" />
     <Compile Include="liveview_bridge.py" />

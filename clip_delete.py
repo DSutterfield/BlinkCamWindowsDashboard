@@ -221,17 +221,19 @@ def finalize_staged_clip(stage):
     """
     Permanently remove files from a completed delete quarantine.
 
-    Unexpected files are never removed. If anything remains in the
-    quarantine directory, finalization fails so it can be investigated
-    or retried.
+    Unexpected files are never removed. If anything unexpected exists,
+    finalization stops while the recovery manifest is still intact.
     """
 
-    quarantine_dir = Path(stage["quarantine_dir"]).resolve()
+    quarantine_dir = Path(
+        stage["quarantine_dir"]
+    ).resolve()
+
     staged_files = stage.get("files", [])
 
-    # Safety: every staged file must belong to this quarantine directory.
     quarantine_paths = []
 
+    # Safety: every staged file must belong to this quarantine directory.
     for staged in staged_files:
 
         quarantine_path = Path(
@@ -244,22 +246,48 @@ def finalize_staged_clip(stage):
                 f"{quarantine_path}"
             )
 
-        quarantine_paths.append(quarantine_path)
+        quarantine_paths.append(
+            quarantine_path
+        )
 
-    # Remove only the files that this delete operation staged.
-    for quarantine_path in quarantine_paths:
+    manifest_path = (
+        quarantine_dir / DELETE_MANIFEST_NAME
+    ).resolve()
 
-        if quarantine_path.exists():
+    # Before deleting anything, verify that the directory contains
+    # only files belonging to this operation plus its manifest.
+    expected_paths = set(quarantine_paths)
+    expected_paths.add(manifest_path)
 
-            if not quarantine_path.is_file():
+    if quarantine_dir.exists():
+
+        for entry in quarantine_dir.iterdir():
+
+            if entry.resolve() not in expected_paths:
                 raise OSError(
-                    f"Unexpected non-file in quarantine: "
-                    f"{quarantine_path}"
+                    f"Unexpected item in quarantine: {entry}"
                 )
 
-            quarantine_path.unlink()
+    # Permanently remove only this operation's staged files.
+    for quarantine_path in quarantine_paths:
 
-    # rmdir deliberately fails if anything unexpected remains.
+        if not quarantine_path.exists():
+            continue
+
+        if not quarantine_path.is_file():
+            raise OSError(
+                f"Unexpected non-file in quarantine: "
+                f"{quarantine_path}"
+            )
+
+        quarantine_path.unlink()
+
+    # Keep the recovery manifest until all staged files are gone.
+    if manifest_path.is_file():
+        manifest_path.unlink()
+
+    # This should now be empty. rmdir still refuses to erase
+    # anything unexpected that might somehow remain.
     if quarantine_dir.exists():
         quarantine_dir.rmdir()
 
