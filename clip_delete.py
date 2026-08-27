@@ -31,6 +31,7 @@ def set_stage_state(stage, state):
 
     allowed_states = {
         "staged",
+        "cloud_delete_pending",
         "cloud_deleted",
         "catalog_deleted",
     }
