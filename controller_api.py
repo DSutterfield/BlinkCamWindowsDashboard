@@ -27,6 +27,7 @@ from clip_delete import (
     set_stage_state,
     stage_clip_for_delete,
 )
+from aiohttp import ClientTimeout
 
 app = FastAPI(
     title="Blink Controller API",
@@ -60,6 +61,54 @@ class MotionRequest(BaseModel):
 
 class SystemArmRequest(BaseModel):
     armed: bool
+
+async def delete_blink_cloud_media(controller, media_id):
+    """
+    Send one media-delete request to Blink.
+
+    Returns the HTTP status and response text so the caller can
+    distinguish success, definite rejection, and uncertain outcomes.
+    """
+
+    blink = controller.blink
+    auth = blink.auth
+
+    # Match BlinkPy's normal token-refresh behavior before making
+    # the request directly through the authenticated session.
+    if auth.need_refresh():
+        await auth.refresh_tokens(refresh=True)
+
+    media_id_text = str(media_id)
+
+    blink_media_id = (
+        int(media_id_text)
+        if media_id_text.isdigit()
+        else media_id_text
+    )
+
+    url = (
+        f"{blink.urls.base_url}"
+        f"/api/v1/accounts/{blink.account_id}"
+        f"/media/delete"
+    )
+
+    headers = dict(auth.header)
+    headers["Content-Type"] = "application/json"
+
+    body = {
+        "media_list": [blink_media_id]
+    }
+
+    async with controller.session.post(
+        url,
+        json=body,
+        headers=headers,
+        timeout=ClientTimeout(total=10),
+    ) as response:
+
+        response_text = await response.text()
+
+        return response.status, response_text
 
 def create_app(controller):
     """Create the Controller API around an existing BlinkController."""
