@@ -1,7 +1,59 @@
+import json
 from pathlib import Path
 import shutil
 import uuid
 
+DELETE_MANIFEST_NAME = "delete-stage.json"
+
+def _write_stage_manifest(stage):
+    """Persist delete-stage recovery information atomically."""
+
+    quarantine_dir = Path(stage["quarantine_dir"])
+
+    manifest_path = (
+        quarantine_dir / DELETE_MANIFEST_NAME
+    )
+
+    temp_path = (
+        quarantine_dir / f"{DELETE_MANIFEST_NAME}.tmp"
+    )
+
+    temp_path.write_text(
+        json.dumps(stage, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    temp_path.replace(manifest_path)
+
+
+def set_stage_state(stage, state):
+    """Persist the current coordinated-delete state."""
+
+    allowed_states = {
+        "staged",
+        "cloud_deleted",
+        "catalog_deleted",
+    }
+
+    if state not in allowed_states:
+        raise ValueError(
+            f"Invalid delete stage state: {state}"
+        )
+
+    stage["state"] = state
+    _write_stage_manifest(stage)
+
+
+def load_stage_manifest(quarantine_dir):
+    """Load a persisted delete-stage manifest."""
+
+    manifest_path = (
+        Path(quarantine_dir) / DELETE_MANIFEST_NAME
+    )
+
+    return json.loads(
+        manifest_path.read_text(encoding="utf-8")
+    )
 
 def stage_clip_for_delete(archive_root, clip):
     """
@@ -85,6 +137,18 @@ def stage_clip_for_delete(archive_root, clip):
             "quarantine_dir": str(quarantine_dir),
             "files": staged_files,
         }
+
+        stage = {
+            "catalog_id": clip["id"],
+            "blink_media_id": clip.get("blink_media_id"),
+            "quarantine_dir": str(quarantine_dir),
+            "files": staged_files,
+            "state": "staged",
+        }
+
+        _write_stage_manifest(stage)
+
+        return stage
 
     except Exception:
 
