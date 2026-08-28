@@ -322,6 +322,75 @@ def create_app(controller):
             ),
         }
 
+    @app.get("/api/v1/devices/{device_id}/thumbnail")
+    async def device_thumbnail(
+        device_id: str,
+        refresh: bool = Query(default=False),
+    ):
+        """Return the cached thumbnail for one Blink camera."""
+
+        if controller.blink is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Blink controller is not connected",
+            )
+
+        camera = None
+
+        for candidate in controller.blink.cameras.values():
+            if str(candidate.camera_id) == device_id:
+                camera = candidate
+                break
+
+        if camera is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Camera was not found",
+            )
+
+        thumbnail_dir = (
+            controller.archive_root / "camera_thumbs"
+        )
+
+        thumbnail_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        thumbnail_path = (
+            thumbnail_dir / f"{device_id}.jpg"
+        )
+
+        if refresh or not thumbnail_path.is_file():
+
+            try:
+                await camera.get_thumbnail()
+                await camera.image_to_file(
+                    str(thumbnail_path)
+                )
+
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Blink camera thumbnail request failed: "
+                        f"{exc}"
+                    ),
+                ) from exc
+
+        if not thumbnail_path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="Camera thumbnail was not available",
+            )
+
+        return FileResponse(
+            path=thumbnail_path,
+            media_type="image/jpeg",
+            filename=f"{device_id}.jpg",
+            content_disposition_type="inline",
+        )
+
     @app.get("/api/v1/systems")
     async def systems():
         """Return Blink systems known to the Pi Controller."""
