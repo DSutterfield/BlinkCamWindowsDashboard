@@ -9,11 +9,13 @@ and the Windows Management Console.
 API Version: 1
 """
 
+import asyncio
 import json
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from pathlib import Path
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from liveview_bridge import LiveViewBridge
 from catalog_store import (
     delete_clip_by_catalog_id,
     get_clip_by_catalog_id,
@@ -61,6 +63,9 @@ class MotionRequest(BaseModel):
 
 class SystemArmRequest(BaseModel):
     armed: bool
+
+class LiveViewStartRequest(BaseModel):
+    name: str
 
 async def delete_blink_cloud_media(controller, media_id):
     """
@@ -247,6 +252,13 @@ def create_app(controller):
         version="1.0",
     )
 
+    liveview_bridge = LiveViewBridge()
+
+    app.add_event_handler(
+        "shutdown",
+        liveview_bridge.shutdown,
+    )
+
     @app.get("/api/v1/health")
     async def health():
         """Return Pi Controller, storage, and Blink connection health."""
@@ -390,6 +402,98 @@ def create_app(controller):
             filename=f"{device_id}.jpg",
             content_disposition_type="inline",
         )
+
+
+    @app.post("/api/v1/liveview/start")
+    async def liveview_start(
+        request: LiveViewStartRequest,
+    ):
+        """Start live view and wait for the first decoded frame."""
+
+        camera_name = request.name.strip()
+
+        if not camera_name:
+            raise HTTPException(
+                status_code=400,
+                detail="A camera name is required",
+            )
+
+        try:
+            return await asyncio.to_thread(
+                liveview_bridge.start,
+                camera_name,
+            )
+
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Live View start failed: {exc}",
+            ) from exc
+
+
+    @app.get("/api/v1/liveview/frame")
+    async def liveview_frame():
+        """Return the latest decoded Live View JPEG frame."""
+
+        status = liveview_bridge.status()
+
+        if not status["active"]:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    status["error"]
+                    or "Live View is not active"
+                ),
+            )
+
+        frame = await asyncio.to_thread(
+            liveview_bridge.latest_frame,
+            1.0,
+        )
+
+        if frame is None:
+            raise HTTPException(
+                status_code=503,
+                detail="No Live View frame is available",
+            )
+
+        return Response(
+            content=frame,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": (
+                    "no-store, no-cache, "
+                    "must-revalidate, max-age=0"
+                ),
+                "Pragma": "no-cache",
+            },
+        )
+
+    @app.get("/api/v1/liveview/status")
+    async def liveview_status():
+        """Return the current Live View state."""
+
+        return liveview_bridge.status()
+
+    @app.post("/api/v1/liveview/stop")
+    async def liveview_stop():
+        """Stop the active Live View session."""
+
+        try:
+            await asyncio.to_thread(
+                liveview_bridge.stop,
+            )
+
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Live View stop failed: {exc}",
+            ) from exc
+
+        return {
+            "ok": True,
+            "active": False,
+        }
 
     @app.get("/api/v1/systems")
     async def systems():
