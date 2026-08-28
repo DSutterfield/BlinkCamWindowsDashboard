@@ -254,7 +254,7 @@ def create_app(controller):
 
     liveview_bridge = LiveViewBridge()
 
-    app.add_event_handler(
+    app.router.add_event_handler(
         "shutdown",
         liveview_bridge.shutdown,
     )
