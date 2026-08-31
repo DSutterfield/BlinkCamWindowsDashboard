@@ -935,7 +935,7 @@ def create_app(controller):
 
     @app.get("/api/v1/clips/{filename}/video")
     async def clip_video(filename: str):
-        """Return one locally archived MP4 clip."""
+        """Return one locally archived MP4 clip with playback-normalized audio."""
 
         if (
             "/" in filename
@@ -956,12 +956,96 @@ def create_app(controller):
                 detail="Clip video was not found",
             )
 
+        # Keep playback copies outside the archive clips directory so they
+        # cannot be mistaken for archived Blink recordings.
+        playback_cache_dir = (
+            controller.archive_dir.parent / "playback_cache"
+        )
+
+        playback_cache_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        playback_path = (
+            playback_cache_dir
+            / f"{video_path.stem}.loudnorm-v1.mp4"
+        )
+
+        # Rebuild the cached playback file if it does not exist or if the
+        # archived source has changed since the cache was created.
+        rebuild_playback = (
+            not playback_path.is_file()
+            or playback_path.stat().st_mtime
+            < video_path.stat().st_mtime
+        )
+
+        if rebuild_playback:
+
+            temp_path = (
+                playback_cache_dir
+                / f"{video_path.stem}.loudnorm-v1.tmp.mp4"
+            )
+
+            if temp_path.exists():
+                temp_path.unlink()
+
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-y",
+                "-i",
+                str(video_path),
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "64k",
+                "-af",
+                "loudnorm=I=-16:TP=-1.5:LRA=11",
+                "-movflags",
+                "+faststart",
+                str(temp_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout_data, stderr_data = await process.communicate()
+
+            if process.returncode != 0:
+
+                if temp_path.exists():
+                    temp_path.unlink()
+
+                error_text = stderr_data.decode(
+                    "utf-8",
+                    errors="replace",
+                ).strip()
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "The playback copy could not be created."
+                        + (
+                            f" {error_text}"
+                            if error_text
+                            else ""
+                        )
+                    ),
+                )
+
+            temp_path.replace(playback_path)
+
         return FileResponse(
-            path=video_path,
+            path=playback_path,
             media_type="video/mp4",
             filename=filename,
             content_disposition_type="inline",
-        )
+    )
 
     @app.get("/api/v1/clips/{filename}/thumbnail")
     async def clip_thumbnail(filename: str):
