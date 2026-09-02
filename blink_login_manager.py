@@ -21,6 +21,7 @@ from blinkpy.blinkpy import Blink
 
 ROOT = Path(__file__).resolve().parent
 CREDENTIALS_PATH = ROOT / "config" / "credentials.json"
+PROVISION_TIMEOUT_SECONDS = 90
 
 
 def emit(status: str, **details) -> None:
@@ -106,8 +107,19 @@ async def main() -> int:
 
     try:
         request = load_request(request_path)
-        await provision(request)
+        await asyncio.wait_for(
+            provision(request), timeout=PROVISION_TIMEOUT_SECONDS
+        )
         return 0
+    except TimeoutError:
+        emit(
+            "error",
+            message=(
+                "Blink authentication timed out after "
+                f"{PROVISION_TIMEOUT_SECONDS} seconds."
+            ),
+        )
+        return 1
     except Exception as exc:
         emit("error", message=str(exc))
         return 1
