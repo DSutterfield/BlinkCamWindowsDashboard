@@ -33,6 +33,7 @@ import json
 import shutil
 import subprocess
 import threading
+import os
 from collections import deque
 from pathlib import Path
 from typing import Iterator
@@ -60,6 +61,7 @@ class LiveViewBridge:
         self._loop_ready = threading.Event()
         self._control_lock = threading.Lock()
         self._frame_condition = threading.Condition()
+        self._audio_condition = threading.Condition()
 
         self._thread = threading.Thread(
             target=self._run_event_loop,
@@ -73,6 +75,7 @@ class LiveViewBridge:
         self._frame_number = 0
         self._last_error: str | None = None
         self._ffmpeg_messages: deque[str] = deque(maxlen=25)
+        self._audio_chunks: deque[bytes] = deque(maxlen=256)
 
         # Objects below are created and used only on the bridge event loop.
         self._session: ClientSession | None = None
@@ -82,6 +85,8 @@ class LiveViewBridge:
         self._frame_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
         self._ffmpeg: asyncio.subprocess.Process | None = None
+        self._audio_task: asyncio.Task | None = None
+        self._audio_read_fd: int | None = None
         self._first_frame_event: asyncio.Event | None = None
 
         self._thread.start()
@@ -229,39 +234,102 @@ class LiveViewBridge:
                 self._ffmpeg_messages.clear()
                 self._frame_condition.notify_all()
 
+            with self._audio_condition:
+                self._audio_chunks.clear()
+                self._audio_condition.notify_all()
+
             self._first_frame_event = asyncio.Event()
 
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self._ffmpeg = await asyncio.create_subprocess_exec(
-                ffmpeg_path,
-                "-hide_banner",
-                "-loglevel",
-                "warning",
-                "-f",
-                "mpegts",
-                "-i",
-                self._stream.url,
-                "-an",
-                "-vf",
-                f"fps={MJPEG_FRAME_RATE},format=yuvj420p",
-                "-c:v",
-                "mjpeg",
-                "-strict",
-                "unofficial",
-                "-q:v",
-                "5",
-                "-f",
-                "mjpeg",
-                "pipe:1",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=creationflags,
+            creationflags = getattr(
+                subprocess,
+                "CREATE_NO_WINDOW",
+                0,
             )
+
+            audio_read_fd, audio_write_fd = os.pipe()
+
+            os.set_blocking(
+                audio_read_fd,
+                False,
+            )
+
+            self._audio_read_fd = audio_read_fd
+
+            try:
+                self._ffmpeg = await asyncio.create_subprocess_exec(
+                    ffmpeg_path,
+                    "-hide_banner",
+                    "-loglevel",
+                    "info",
+                    "-nostats",
+                    "-f",
+                    "mpegts",
+                    "-i",
+                    self._stream.url,
+
+                    # Output 1: existing Live View video.
+                    "-map",
+                    "0:v:0",
+                    "-an",
+                    "-vf",
+                    f"fps={MJPEG_FRAME_RATE},format=yuvj420p",
+                    "-c:v",
+                    "mjpeg",
+                    "-strict",
+                    "unofficial",
+                    "-q:v",
+                    "5",
+                    "-f",
+                    "mjpeg",
+                    "pipe:1",
+
+                    # Output 2: live camera microphone audio.
+                    "-map",
+                    "0:a:0",
+                    "-vn",
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "64k",
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    "-af",
+                    (
+                        "highpass=f=250,"
+                        "lowpass=f=3000,"
+                        "volume=35dB"
+                    ),
+                    "-write_xing",
+                    "0",
+                    "-id3v2_version",
+                    "0",
+                    "-flush_packets",
+                    "1",
+                    "-f",
+                    "mp3",
+                    f"pipe:{audio_write_fd}",
+
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=creationflags,
+                    pass_fds=(audio_write_fd,),
+                )
+
+            finally:
+                os.close(audio_write_fd)
 
             self._frame_task = asyncio.create_task(
                 self._read_ffmpeg_frames(),
                 name="ReadLiveViewFrames",
             )
+
+            self._audio_task = asyncio.create_task(
+                self._read_ffmpeg_audio(),
+                name="ReadLiveViewAudio",
+            )
+
             self._stderr_task = asyncio.create_task(
                 self._read_ffmpeg_stderr(),
                 name="ReadLiveViewFfmpegStderr",
@@ -351,6 +419,40 @@ class LiveViewBridge:
                 and not stream.target_writer.is_closing()
             ):
                 stream.target_writer.close()
+
+    async def _read_ffmpeg_audio(self) -> None:
+        """Read encoded MP3 audio from FFmpeg's separate audio pipe."""
+
+        if self._audio_read_fd is None:
+            return
+
+        try:
+            while True:
+
+                try:
+                    chunk = os.read(
+                        self._audio_read_fd,
+                        16 * 1024,
+                    )
+
+                except BlockingIOError:
+                    await asyncio.sleep(0.02)
+                    continue
+
+                if not chunk:
+                    break
+
+                with self._audio_condition:
+                    self._audio_chunks.append(chunk)
+                    self._audio_condition.notify_all()
+
+        except asyncio.CancelledError:
+            raise
+
+        except Exception as exc:
+            self._set_error(
+                f"FFmpeg audio reader failed: {exc}"
+            )
 
     async def _read_ffmpeg_frames(self) -> None:
         """Split FFmpeg's MJPEG byte stream into individual JPEG images."""
@@ -463,14 +565,44 @@ class LiveViewBridge:
             )
             return self._latest_frame
 
+    def next_audio_chunk(
+        self,
+        timeout: float = 1.0,
+    ) -> bytes | None:
+        """Return the next encoded Live View audio chunk."""
+
+        with self._audio_condition:
+
+            self._audio_condition.wait_for(
+                lambda: (
+                    bool(self._audio_chunks)
+                    or not self._active
+                ),
+                timeout=timeout,
+            )
+
+            if self._audio_chunks:
+                return self._audio_chunks.popleft()
+
+            return None
+
+    def clear_audio(self) -> None:
+        """Discard queued Live View audio."""
+
+        with self._audio_condition:
+            self._audio_chunks.clear()
+            self._audio_condition.notify_all()
+
     def status(self) -> dict:
-        """Return thread-safe bridge status for a future Flask status route."""
+        """Return thread-safe bridge status and FFmpeg diagnostics."""
+
         with self._frame_condition:
             return {
                 "active": self._active,
                 "camera": self._camera_name,
                 "frames": self._frame_number,
                 "error": self._last_error,
+                "ffmpeg_messages": list(self._ffmpeg_messages),
             }
 
     def stop(self) -> None:
@@ -513,17 +645,32 @@ class LiveViewBridge:
                     with contextlib.suppress(asyncio.CancelledError, Exception):
                         await self._feed_task
 
-        for task in (self._frame_task, self._stderr_task):
+        for task in (
+            self._frame_task,
+            self._audio_task,
+            self._stderr_task,
+        ):
             if task is not None and not task.done():
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
+                with contextlib.suppress(
+                    asyncio.CancelledError,
+                    Exception,
+                ):
                     await task
+
+        if self._audio_read_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(self._audio_read_fd)
+
+            self._audio_read_fd = None
 
         self._stream = None
         self._feed_task = None
         self._frame_task = None
+        self._audio_task = None
         self._stderr_task = None
         self._ffmpeg = None
+        self._audio_read_fd = None
         self._first_frame_event = None
 
         with self._frame_condition:
@@ -533,6 +680,10 @@ class LiveViewBridge:
             if not preserve_error:
                 self._last_error = None
             self._frame_condition.notify_all()
+
+        with self._audio_condition:
+            self._audio_chunks.clear()
+            self._audio_condition.notify_all()
 
     async def _shutdown_async(self) -> None:
         """Stop the stream and close the persistent Blink HTTP session."""

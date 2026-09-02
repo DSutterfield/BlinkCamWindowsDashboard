@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from pathlib import Path
 from fastapi.responses import FileResponse, Response
+from fastapi.responses import StreamingResponse
 from liveview_bridge import LiveViewBridge
 from catalog_store import (
     delete_clip_by_catalog_id,
@@ -460,6 +461,55 @@ def create_app(controller):
         return Response(
             content=frame,
             media_type="image/jpeg",
+            headers={
+                "Cache-Control": (
+                    "no-store, no-cache, "
+                    "must-revalidate, max-age=0"
+                ),
+                "Pragma": "no-cache",
+            },
+        )
+
+    @app.get("/api/v1/liveview/audio")
+    async def liveview_audio():
+        """Stream the active Live View camera microphone audio."""
+
+        status = liveview_bridge.status()
+
+        if not status["active"]:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    status["error"]
+                    or "Live View is not active"
+                ),
+            )
+
+        # Start listening at the current moment rather than
+        # playing audio accumulated since Live View started.
+        liveview_bridge.clear_audio()
+
+        async def audio_stream():
+
+            while True:
+
+                chunk = await asyncio.to_thread(
+                    liveview_bridge.next_audio_chunk,
+                    1.0,
+                )
+
+                if chunk:
+                    yield chunk
+                    continue
+
+                status = liveview_bridge.status()
+
+                if not status["active"]:
+                    break
+
+        return StreamingResponse(
+            audio_stream(),
+            media_type="audio/mpeg",
             headers={
                 "Cache-Control": (
                     "no-store, no-cache, "
